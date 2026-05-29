@@ -1,0 +1,7 @@
+.env
+venv/
+.venv/
+.conda/
+_Project/__pycache__
+authentication/__pycache__
+authentication/migrations/__pycache__

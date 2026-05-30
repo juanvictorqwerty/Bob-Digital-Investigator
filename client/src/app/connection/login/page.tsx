@@ -4,6 +4,7 @@ import { ButtonColor, ButtonTextColor, ButtonColorHover } from "@/colors/Colors"
 import { useState } from "react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Login() {
     const [email, setEmail] = useState("");
@@ -91,6 +92,12 @@ export default function Login() {
                 >
                     {isLoading ? "Logging in..." : "Login"}
                 </button>
+
+                <div className="mt-4 text-center">
+                    <Link href="/connection/register" className="text-blue-600 hover:underline">
+                        Don't have an account? Sign up
+                    </Link>
+                </div>
             </form>
         </AuthLayout>
     )

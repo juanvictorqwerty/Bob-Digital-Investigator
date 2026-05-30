@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'storages',
     'corsheaders',
+    'cloudinary',
     'authentication',
     'reversewebsearch'
 ]
@@ -155,21 +156,16 @@ CORS_ALLOWED_ORIGINS = [
 
 STORAGES = {
     "default": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
 
-# MinIO Configuration
-AWS_ACCESS_KEY_ID = env('MINIO_ACCESS_KEY')
-AWS_SECRET_ACCESS_KEY = env('MINIO_SECRET_KEY')
-AWS_STORAGE_BUCKET_NAME = env('MINIO_BUCKET_NAME')
-AWS_S3_ENDPOINT_URL = env('MINIO_ENDPOINT')
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = None
-AWS_S3_VERIFY = False
-
+# Cloudinary Configuration
+CLOUDINARY_CLOUD_NAME = env('CLOUDINARY_CLOUD_NAME', default='')
+CLOUDINARY_API_KEY = env('CLOUDINARY_API_KEY', default='')
+CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
 # SerpApi Configuration
 SERPAPI_KEY = env('SERPAPI_KEY', default='')

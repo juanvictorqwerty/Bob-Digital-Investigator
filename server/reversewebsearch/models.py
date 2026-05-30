@@ -1,13 +1,13 @@
 import uuid
 from django.db import models
+from cloudinary.models import CloudinaryField
 
 class WebsearchResults(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
     user = models.ForeignKey('authentication.CustomUser', on_delete=models.CASCADE)
     
-    # 1. Removed relative "../" path. Files will go to the "reversewebsearch" folder inside your MinIO bucket.
-    image = models.ImageField(upload_to='reversewebsearch/')
+    image = CloudinaryField('image', folder='reversewebsearch')
     
     query = models.CharField(max_length=255)
     results = models.JSONField(default=dict, blank=True, null=True)

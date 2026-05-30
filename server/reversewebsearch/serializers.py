@@ -14,15 +14,16 @@ class ReverseImageSearchSerializer(serializers.ModelSerializer):
         help_text="URL of the image to search (provide this OR upload an image file)"
     )
     
+    image = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        help_text="Upload an image file (provide this OR an image_url)"
+    )
+    
     class Meta:
         model = WebsearchResults
         fields = ['image_url', 'image', 'query']
         extra_kwargs = {
-            'image': {
-                'required': False,
-                'allow_null': True,
-                'help_text': "Upload an image file (provide this OR an image_url)"
-            },
             'query': {
                 'required': False,
                 'allow_blank': True,

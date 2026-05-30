@@ -40,15 +40,16 @@ class ReverseImageSearchView(GenericAPIView):
         uploaded_image = serializer.validated_data.get('image')
         query = serializer.validated_data.get('query', '')
 
-        if uploaded_image:
-            image_url = self._get_temp_image_url(uploaded_image)
+        # If an image file is uploaded, upload to Cloudinary first to get URL
+        cloudinary_public_id = None
+        if uploaded_image and not image_url:
+            image_url, cloudinary_public_id = self._upload_to_cloudinary(uploaded_image)
 
         try:
             results = self._perform_reverse_search(image_url)
             
-            # Only save if user is authenticated
             if request.user and request.user.is_authenticated:
-                self._save_results(request.user, uploaded_image, image_url, query, results)
+                self._save_results(request.user, uploaded_image, cloudinary_public_id, image_url, query, results)
             
             return JsonResponse({"results": results}, status=status.HTTP_200_OK)
         except Exception as e:
@@ -57,23 +58,43 @@ class ReverseImageSearchView(GenericAPIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def _get_temp_image_url(self, uploaded_image):
-        from django.core.files.storage import default_storage
-        ext = os.path.splitext(uploaded_image.name)[1]
-        filename = f"temp_{uuid.uuid4()}{ext}"
-        path = default_storage.save(f"reversewebsearch/temp/{filename}", uploaded_image)
-        return default_storage.url(path)
+    def _upload_to_cloudinary(self, uploaded_image):
+        """
+        Upload image to Cloudinary and return a public HTTPS URL and public_id.
+        Cloudinary URLs are globally accessible and fast for SerpAPI.
+        """
+        import cloudinary
+        import cloudinary.uploader
+        
+        # Configure Cloudinary
+        cloudinary.config(
+            cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+            api_key=settings.CLOUDINARY_API_KEY,
+            api_secret=settings.CLOUDINARY_API_SECRET,
+            secure=True
+        )
+        
+        # Upload the image
+        # Use a unique public_id to avoid collisions
+        public_id = f"reverse_search/{uuid.uuid4().hex}"
+        
+        result = cloudinary.uploader.upload(
+            uploaded_image,
+            public_id=public_id,
+            folder="bob_investigator",
+            overwrite=False,
+            resource_type="image"
+        )
+        
+        # Return the secure HTTPS URL and public_id
+        return result["secure_url"], result["public_id"]
 
     def _perform_reverse_search(self, image_url):
-        # Build tbs parameter: combine exact match (imgo:1) and date filter (qdr:y)
-        tbs_filters = ["imgo:1", "qdr:y"]
-        tbs_value = ",".join(tbs_filters)
-        
         params = {
             "engine": "google_reverse_image",
             "image_url": image_url,
             "api_key": settings.SERPAPI_KEY,
-            "tbs": tbs_value,
+            "tbs": "imgo:1,qdr:y"
         }
         
         search = GoogleSearch(params)
@@ -81,7 +102,6 @@ class ReverseImageSearchView(GenericAPIView):
         
         formatted_results = []
         
-        # Process results from both possible response structures
         raw_results = []
         if "visual_matches" in results:
             raw_results = results["visual_matches"]
@@ -89,13 +109,8 @@ class ReverseImageSearchView(GenericAPIView):
             raw_results = results["image_results"]
         
         for match in raw_results:
-            # Extract published_date from various possible fields
             published_date = self._extract_published_date(match)
-            
-            # Convert datetime to ISO string for JSON serialization
             published_date_str = self._format_date_for_json(published_date)
-            
-            # Extract domain from source or URL
             domain = self._extract_domain(match)
             
             formatted_results.append({
@@ -106,8 +121,6 @@ class ReverseImageSearchView(GenericAPIView):
                 "published_date": published_date_str,
             })
         
-        # Sort by published_date ascending (oldest first)
-        # Use the datetime object for sorting, then convert to string
         formatted_results.sort(
             key=lambda x: datetime.fromisoformat(x["published_date"]) 
             if x["published_date"] else datetime.max
@@ -116,35 +129,27 @@ class ReverseImageSearchView(GenericAPIView):
         return formatted_results
 
     def _format_date_for_json(self, date_obj):
-        """Convert datetime object to ISO format string for JSON serialization."""
         if date_obj is None:
             return None
         if isinstance(date_obj, datetime):
             return date_obj.isoformat()
         if isinstance(date_obj, str):
-            # Try to parse and re-format
             parsed = self._parse_date(date_obj)
             if parsed:
                 return parsed.isoformat()
         return None
 
     def _extract_published_date(self, match):
-        """
-        Extract published date from various possible fields in SerpAPI response.
-        """
-        # Check direct date fields
         for field in ["date", "published_date"]:
             if field in match and match[field]:
                 return self._parse_date(match[field])
         
-        # Try to extract from snippet
         snippet = match.get("snippet", "")
         if snippet:
             parsed = self._parse_date_from_snippet(snippet)
             if parsed:
                 return parsed
         
-        # Try to extract from source info
         source_info = match.get("source_info", {})
         if isinstance(source_info, dict):
             for field in ["date", "published_date"]:
@@ -154,7 +159,6 @@ class ReverseImageSearchView(GenericAPIView):
         return None
 
     def _parse_date(self, date_value):
-        """Parse various date formats into a datetime object."""
         if isinstance(date_value, datetime):
             return date_value
         
@@ -180,10 +184,8 @@ class ReverseImageSearchView(GenericAPIView):
         return None
 
     def _parse_date_from_snippet(self, snippet):
-        """Try to extract date from snippet text."""
         import re
         
-        # Pattern for "X days/weeks/months/years ago"
         relative_pattern = r'(\d+)\s+(day|week|month|year)s?\s+ago'
         match = re.search(relative_pattern, snippet, re.IGNORECASE)
         if match:
@@ -201,7 +203,6 @@ class ReverseImageSearchView(GenericAPIView):
             elif unit == "year":
                 return now.replace(year=now.year - num)
         
-        # Pattern for date like "Jan 15, 2023"
         date_patterns = [
             r'([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})',
             r'(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})',
@@ -223,7 +224,6 @@ class ReverseImageSearchView(GenericAPIView):
         return None
 
     def _extract_domain(self, match):
-        """Extract domain from source field or URL."""
         source = match.get("source", "")
         if source:
             return source
@@ -241,13 +241,14 @@ class ReverseImageSearchView(GenericAPIView):
         
         return ""
 
-    def _save_results(self, user, uploaded_image, image_url, query, results):
-        """Save search results to the database."""
-        image_file = uploaded_image if uploaded_image else None
+    def _save_results(self, user, uploaded_image, cloudinary_public_id, image_url, query, results):
+        # If we have a cloudinary_public_id, use it to reference the already-uploaded image
+        # Otherwise, use the uploaded_image file (which will trigger Cloudinary upload via CloudinaryField)
+        image_value = cloudinary_public_id if cloudinary_public_id else uploaded_image
         
         WebsearchResults.objects.create(
             user=user,
-            image=image_file,
+            image=image_value,
             query=query or image_url,
             results=results
         )

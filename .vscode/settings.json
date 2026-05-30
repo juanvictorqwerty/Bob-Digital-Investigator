@@ -1,0 +1,12 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "driver": "PostgreSQL",
+            "connectString": "postgresql://admin:admin123@localhost:5432/bob_investigate",
+            "name": "Database"
+        }
+    ]
+}

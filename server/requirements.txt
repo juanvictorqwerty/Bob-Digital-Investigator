@@ -1,0 +1,10 @@
+Django>=6.0.3
+djangorestframework>=3.15.0
+django-environ
+google-search-results
+psycopg2-binary
+django-cors-headers
+django-storages
+cloudinary
+requests
+beautifulsoup4

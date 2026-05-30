@@ -48,8 +48,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
+    'storages',
     'corsheaders',
     'authentication',
+    'reversewebsearch'
 ]
 
 MIDDLEWARE = [
@@ -150,3 +152,24 @@ AUTH_USER_MODEL = 'authentication.CustomUser'
 CORS_ALLOWED_ORIGINS = [
     env("FRONTEND_URL")
 ]
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+# MinIO Configuration
+AWS_ACCESS_KEY_ID = env('MINIO_ACCESS_KEY')
+AWS_SECRET_ACCESS_KEY = env('MINIO_SECRET_KEY')
+AWS_STORAGE_BUCKET_NAME = env('MINIO_BUCKET_NAME')
+AWS_S3_ENDPOINT_URL = env('MINIO_ENDPOINT')
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_S3_VERIFY = False
+
+# SerpApi Configuration
+SERPAPI_KEY = env('SERPAPI_KEY', default='')

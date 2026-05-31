@@ -10,13 +10,233 @@ from rest_framework.authentication import TokenAuthentication
 from serpapi import GoogleSearch
 from .serializers import ReverseImageSearchSerializer
 from .models import WebsearchResults
-import os
 import uuid
-import random
 import requests
+import logging
 from urllib.parse import urlparse
 from datetime import datetime
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
+
+
+def fetch_image_metadata(url):
+    """
+    Fetch image metadata (file size, dimensions) using SERP API image search.
+    Returns a dict with file_size_bytes and dimensions.
+    """
+    logger.info(f"Fetching metadata for image URL: {url}")
+    
+    try:
+        params = {
+            "engine": "google_images",
+            "q": url,
+            "api_key": settings.SERPAPI_KEY,
+            "ijn": 0
+        }
+        
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        
+        metadata = {
+            "file_size_bytes": None,
+            "dimensions": None
+        }
+        
+        # Extract metadata from image results
+        if "images_results" in results:
+            images = results["images_results"]
+            if images:
+                first_image = images[0]
+                
+                # Extract file size
+                if "file_size" in first_image:
+                    try:
+                        file_size = first_image["file_size"]
+                        # Handle various formats (e.g., "200 KB", "1.5 MB")
+                        if isinstance(file_size, str):
+                            if "KB" in file_size:
+                                metadata["file_size_bytes"] = int(float(file_size.replace("KB", "").strip()) * 1024)
+                            elif "MB" in file_size:
+                                metadata["file_size_bytes"] = int(float(file_size.replace("MB", "").strip()) * 1024 * 1024)
+                            elif "GB" in file_size:
+                                metadata["file_size_bytes"] = int(float(file_size.replace("GB", "").strip()) * 1024 * 1024 * 1024)
+                        elif isinstance(file_size, (int, float)):
+                            metadata["file_size_bytes"] = int(file_size)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing file size for {url}: {str(e)}")
+                
+                # Extract dimensions
+                if "width" in first_image and "height" in first_image:
+                    try:
+                        metadata["dimensions"] = {
+                            "width": int(first_image["width"]),
+                            "height": int(first_image["height"])
+                        }
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing dimensions for {url}: {str(e)}")
+        
+        logger.info(f"Successfully fetched metadata for {url}: {metadata}")
+        return metadata
+        
+    except Exception as e:
+        logger.error(f"Error fetching metadata for {url}: {str(e)}")
+        return {
+            "file_size_bytes": None,
+            "dimensions": None
+        }
+
+
+def rank_images(results):
+    """
+    Rank images by file size (largest first) or by oldest published_date if size unavailable.
+    Returns sorted list of results.
+    """
+    logger.info(f"Ranking {len(results)} images")
+    
+    def sort_key(result):
+        file_size = result.get("file_size_bytes")
+        published_date = result.get("published_date")
+        
+        # Primary sort: file_size_bytes descending (largest first)
+        if file_size is not None:
+            return (-file_size, datetime.max)  # Use datetime.max as secondary key to prioritize size
+        # Secondary sort: published_date ascending (oldest first)
+        elif published_date:
+            try:
+                return (0, datetime.fromisoformat(published_date))
+            except (ValueError, TypeError):
+                return (0, datetime.max)
+        else:
+            return (0, datetime.max)
+    
+    sorted_results = sorted(results, key=sort_key)
+    
+    logger.info(f"Ranked images - top result: {sorted_results[0].get('url') if sorted_results else 'None'}")
+    return sorted_results
+
+
+def crawl_image(url):
+    """
+    Crawl an image URL using RapidAPI scraping endpoint with 10-second timeout.
+    Returns a dict with crawl_status, crawl_error, crawled_at, and raw_snippet.
+    """
+    logger.info(f"Crawling image URL: {url}")
+    
+    rapidapi_host = "scrapey-link-scraper.p.rapidapi.com"
+    
+    try:
+        # Parse domain from URL for RapidAPI
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+        
+        # Make request to RapidAPI
+        rapidapi_url = f"https://{rapidapi_host}/v1/scrapelinks/"
+        params = {
+            "url": domain,
+            "maxlinks": 10,
+            "includequery": "true"
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "x-rapidapi-host": rapidapi_host,
+            "x-rapidapi-key": settings.RAPIDAPI_KEY
+        }
+        
+        response = requests.get(
+            rapidapi_url,
+            params=params,
+            headers=headers,
+            timeout=10
+        )
+        
+        # Handle rate limiting
+        if response.status_code == 429:
+            logger.warning(f"Rate limited by RapidAPI for URL: {url}")
+            return {
+                "crawl_status": "failed",
+                "crawl_error": "Rate limit exceeded",
+                "crawled_at": datetime.utcnow().isoformat(),
+                "raw_snippet": None
+            }
+        
+        # Parse RapidAPI response
+        if response.status_code == 200:
+            crawl_data = response.json()
+            logger.info(f"Successfully crawled URL: {url}")
+            
+            # Extract raw snippet (first 300 chars)
+            raw_snippet = extract_raw_snippet(crawl_data)
+            
+            return {
+                "crawl_status": "success",
+                "crawl_error": None,
+                "crawled_at": datetime.utcnow().isoformat(),
+                "raw_snippet": raw_snippet
+            }
+        else:
+            logger.warning(f"RapidAPI returned status {response.status_code} for URL: {url}")
+            return {
+                "crawl_status": "failed",
+                "crawl_error": f"RapidAPI returned status {response.status_code}",
+                "crawled_at": datetime.utcnow().isoformat(),
+                "raw_snippet": None
+            }
+            
+    except requests.exceptions.Timeout:
+        logger.warning(f"Timeout crawling URL: {url}")
+        return {
+            "crawl_status": "failed",
+            "crawl_error": "Crawl timeout",
+            "crawled_at": datetime.utcnow().isoformat(),
+            "raw_snippet": None
+        }
+    except Exception as e:
+        logger.error(f"Error crawling URL {url}: {str(e)}")
+        return {
+            "crawl_status": "failed",
+            "crawl_error": str(e),
+            "crawled_at": datetime.utcnow().isoformat(),
+            "raw_snippet": None
+        }
+
+
+def extract_raw_snippet(crawl_data):
+    """
+    Extract the first 300 characters from the crawl response.
+    Handles various response formats from RapidAPI.
+    """
+    try:
+        # Try to get HTML content
+        if "html" in crawl_data:
+            html_content = crawl_data["html"]
+            if isinstance(html_content, str):
+                # Strip HTML tags for snippet
+                soup = BeautifulSoup(html_content, 'html.parser')
+                text = soup.get_text()
+                return text[:300]
+            return str(html_content)[:300]
+        
+        # Try to get content field
+        if "content" in crawl_data:
+            content = crawl_data["content"]
+            if isinstance(content, str):
+                return content[:300]
+            return str(content)[:300]
+        
+        # Try to get text field
+        if "text" in crawl_data:
+            text = crawl_data["text"]
+            if isinstance(text, str):
+                return text[:300]
+            return str(text)[:300]
+        
+        # Fallback: return first 300 chars of entire response
+        return str(crawl_data)[:300]
+        
+    except Exception as e:
+        logger.warning(f"Error extracting raw snippet: {str(e)}")
+        return None
 
 
 class ReverseImageSearchView(GenericAPIView):
@@ -51,22 +271,61 @@ class ReverseImageSearchView(GenericAPIView):
             image_url, cloudinary_public_id = self._upload_to_cloudinary(uploaded_image)
 
         try:
+            # Perform reverse image search to get initial results
             results = self._perform_reverse_search(image_url)
             
-            # Select pages to crawl based on priority logic
-            pages_to_crawl = self._select_pages_to_crawl(results)
+            # Fetch image metadata (file size, dimensions) for each result
+            results_with_metadata = []
+            for result in results:
+                image_url_result = result.get('url')
+                if image_url_result:
+                    logger.info(f"Fetching metadata for image: {image_url_result}")
+                    metadata = fetch_image_metadata(image_url_result)
+                    result.update(metadata)
+                results_with_metadata.append(result)
             
-            # Crawl selected pages and extract data
-            crawled_data = self._crawl_pages(pages_to_crawl)
+            # Rank images by file size (largest first) or by oldest published_date if size unavailable
+            ranked_results = rank_images(results_with_metadata)
             
-            # Merge crawled data with results
-            enriched_results = self._merge_crawled_data(results, crawled_data)
+            # Select top 5 images for crawling
+            top_5_images = ranked_results[:5]
+            logger.info(f"Selected top 5 images for crawling")
+            
+            # Crawl only the top 5 images
+            for image in top_5_images:
+                image_url_result = image.get('url')
+                if image_url_result:
+                    logger.info(f"Crawling image: {image_url_result}")
+                    crawl_data = crawl_image(image_url_result)
+                    image.update(crawl_data)
+            
+            # Prepare response with ALL results (not just crawled ones)
+            enriched_results = []
+            for result in ranked_results:
+                is_crawled = result.get("crawl_status") is not None
+                enriched_results.append({
+                    "url": result.get("url", ""),
+                    "domain": result.get("domain", ""),
+                    "title": result.get("title", ""),
+                    "published_date": result.get("published_date"),
+                    "file_size_bytes": result.get("file_size_bytes"),
+                    "dimensions": result.get("dimensions"),
+                    "is_crawled": is_crawled,
+                    "crawl_status": result.get("crawl_status"),
+                    "crawl_error": result.get("crawl_error"),
+                    "crawled_at": result.get("crawled_at"),
+                    "raw_snippet": result.get("raw_snippet")
+                })
             
             if request.user and request.user.is_authenticated:
                 self._save_results(request.user, uploaded_image, cloudinary_public_id, image_url, query, enriched_results)
             
-            return JsonResponse({"results": enriched_results}, status=status.HTTP_200_OK)
+            return JsonResponse({
+                "total": len(enriched_results),
+                "results": enriched_results
+            }, status=status.HTTP_200_OK)
         except Exception as e:
+            logger.error(f"Error in reverse image search: {str(e)}")
             return JsonResponse(
                 {"error": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -134,11 +393,6 @@ class ReverseImageSearchView(GenericAPIView):
                 "thumbnail": match.get("thumbnail", ""),
                 "published_date": published_date_str,
             })
-        
-        formatted_results.sort(
-            key=lambda x: datetime.fromisoformat(x["published_date"]) 
-            if x["published_date"] else datetime.max
-        )
         
         return formatted_results
 
@@ -267,138 +521,3 @@ class ReverseImageSearchView(GenericAPIView):
             results=results
         )
 
-    def _select_pages_to_crawl(self, results):
-        """
-        Select pages to crawl using priority logic:
-        - Sort results by published_date ascending, take the 3 oldest with a non-null date
-        - If fewer than 3 have a date, fill the remaining slots by randomly picking from null-date results until you have 2 total (not 3)
-        """
-        # Separate results with and without dates
-        with_dates = [r for r in results if r.get('published_date')]
-        without_dates = [r for r in results if not r.get('published_date')]
-        
-        # Sort with_dates by published_date ascending
-        with_dates_sorted = sorted(with_dates, key=lambda x: datetime.fromisoformat(x['published_date']))
-        
-        # Take up to 3 oldest with dates
-        selected = with_dates_sorted[:3]
-        
-        # If we have fewer than 3 with dates, fill from null-date results until we have 2 total
-        if len(selected) < 3 and without_dates:
-            needed = min(2 - len(selected), len(without_dates))
-            if needed > 0:
-                selected.extend(random.sample(without_dates, needed))
-        
-        return selected
-
-    def _crawl_pages(self, pages):
-        """
-        Crawl selected pages and extract data.
-        Skip pages requiring login or returning 4xx/5xx.
-        """
-        crawled_data = {}
-        
-        for page in pages:
-            url = page.get('url')
-            if not url:
-                continue
-            
-            try:
-                data = self._crawl_single_page(url)
-                crawled_data[url] = data
-            except Exception as e:
-                # Skip pages that fail to crawl
-                crawled_data[url] = {'error': str(e)}
-        
-        return crawled_data
-
-    def _crawl_single_page(self, url):
-        """
-        Crawl a single page and extract required data.
-        """
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        # Skip pages with 4xx/5xx responses
-        if response.status_code >= 400:
-            raise Exception(f"HTTP {response.status_code}")
-        
-        # Check for login requirement (basic heuristic)
-        if 'login' in response.text.lower() or 'sign in' in response.text.lower():
-            raise Exception("Login required")
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Extract page title
-        page_title = soup.title.string if soup.title else ''
-        
-        # Extract page description
-        meta_desc = soup.find('meta', attrs={'name': 'description'})
-        page_description = meta_desc.get('content', '') if meta_desc else ''
-        
-        # Extract image data (find the image that matches the thumbnail)
-        img_alt = ''
-        img_caption = ''
-        surrounding_text = ''
-        
-        # Try to find the main image - this is a simplified approach
-        # In a real implementation, you'd match against the thumbnail URL
-        images = soup.find_all('img')
-        if images:
-            main_img = images[0]  # Take first image as fallback
-            img_alt = main_img.get('alt', '')
-            
-            # Find nearest figcaption or .caption
-            caption = main_img.find_parent('figure')
-            if caption:
-                figcaption = caption.find('figcaption')
-                if figcaption:
-                    img_caption = figcaption.get_text(strip=True)
-                else:
-                    caption_div = caption.find(class_='caption')
-                    if caption_div:
-                        img_caption = caption_div.get_text(strip=True)
-            
-            # Extract surrounding text (up to 300 chars before and after)
-            img_text = str(main_img)
-            img_index = response.text.find(img_text)
-            if img_index > 0:
-                start = max(0, img_index - 300)
-                end = min(len(response.text), img_index + len(img_text) + 300)
-                surrounding_text = response.text[start:end]
-        
-        return {
-            'img_alt': img_alt,
-            'img_caption': img_caption,
-            'surrounding_text': surrounding_text,
-            'page_description': page_description,
-            'page_title': page_title
-        }
-
-    def _merge_crawled_data(self, results, crawled_data):
-        """
-        Merge crawled data with the original results.
-        For pages that failed to crawl, fall back to Google snippet text.
-        """
-        enriched_results = []
-        
-        for result in results:
-            url = result.get('url')
-            crawled = crawled_data.get(url, {})
-            
-            if 'error' in crawled:
-                # Fall back to Google snippet
-                enriched_result = result.copy()
-                enriched_result['crawl_status'] = 'failed'
-                enriched_result['crawl_error'] = crawled['error']
-            else:
-                enriched_result = result.copy()
-                enriched_result.update(crawled)
-                enriched_result['crawl_status'] = 'success'
-            
-            enriched_results.append(enriched_result)
-        
-        return enriched_results

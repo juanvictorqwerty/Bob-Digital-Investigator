@@ -169,3 +169,5 @@ CLOUDINARY_API_KEY = env('CLOUDINARY_API_KEY', default='')
 CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
 # SerpApi Configuration
 SERPAPI_KEY = env('SERPAPI_KEY', default='')
+# RapidAPI Configuration
+RAPIDAPI_KEY = env('RAPIDAPI_KEY', default='')

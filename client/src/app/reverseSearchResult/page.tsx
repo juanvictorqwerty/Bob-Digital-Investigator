@@ -7,10 +7,15 @@ interface SearchResult {
   title: string;
   url: string;
   domain: string;
-  thumbnail: string;
+  thumbnail?: string;
   published_date: string | null;
-  crawl_status: string;
+  is_crawled: boolean;
+  crawl_status?: string;
   crawl_error?: string;
+  crawled_at?: string;
+  raw_snippet?: string;
+  file_size_bytes?: number | null;
+  dimensions?: { width: number; height: number } | null;
 }
 
 interface Results {
@@ -93,7 +98,7 @@ export default function ReverseSearchResult() {
   const withImages = items.filter((r) => r.thumbnail);
 
   // Stats
-  const crawledCount = items.filter((r) => r.crawl_status === "success").length;
+  const crawledCount = items.filter((r) => r.is_crawled).length;
   const datedCount = items.filter((r) => r.published_date).length;
 
   return (
@@ -160,13 +165,19 @@ export default function ReverseSearchResult() {
                   </span>
 
                   {/* Crawl status */}
-                  {r.crawl_status === "success" ? (
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-green-50 text-green-700">
-                      crawled
-                    </span>
+                  {r.is_crawled ? (
+                    r.crawl_status === "success" ? (
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-green-50 text-green-700">
+                        crawled
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-red-50 text-red-600">
+                        {r.crawl_error ?? "failed"}
+                      </span>
+                    )
                   ) : (
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-red-50 text-red-600">
-                      {r.crawl_error ?? "failed"}
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                      not crawled
                     </span>
                   )}
 

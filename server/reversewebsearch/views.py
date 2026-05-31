@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import TokenAuthentication
 from serpapi import GoogleSearch
 from .serializers import ReverseImageSearchSerializer
 from .models import WebsearchResults
@@ -21,6 +22,7 @@ from bs4 import BeautifulSoup
 class ReverseImageSearchView(GenericAPIView):
     parser_classes = (MultiPartParser, FormParser)
     serializer_class = ReverseImageSearchSerializer
+    authentication_classes=[TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):

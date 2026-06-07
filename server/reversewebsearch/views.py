@@ -1,6 +1,6 @@
 # reversewebsearch/views.py
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from rest_framework.generics import GenericAPIView
 from rest_framework import status
 from rest_framework.response import Response
@@ -10,12 +10,16 @@ from rest_framework.authentication import TokenAuthentication
 from serpapi import GoogleSearch
 from .serializers import ReverseImageSearchSerializer
 from .models import WebsearchResults
+from .tasks import run_reverse_search_pipeline
 import uuid
 import requests
 import logging
+import json
+import time
 from urllib.parse import urlparse
 from datetime import datetime
 from bs4 import BeautifulSoup
+from celery.result import AsyncResult
 
 logger = logging.getLogger(__name__)
 
@@ -271,61 +275,22 @@ class ReverseImageSearchView(GenericAPIView):
             image_url, cloudinary_public_id = self._upload_to_cloudinary(uploaded_image)
 
         try:
-            # Perform reverse image search to get initial results
-            results = self._perform_reverse_search(image_url)
+            # Enqueue Celery task for async processing
+            user_id = request.user.id if request.user and request.user.is_authenticated else None
+            task = run_reverse_search_pipeline.delay(
+                image_url=image_url,
+                query=query,
+                user_id=user_id,
+                cloudinary_public_id=cloudinary_public_id
+            )
             
-            # Fetch image metadata (file size, dimensions) for each result
-            results_with_metadata = []
-            for result in results:
-                image_url_result = result.get('url')
-                if image_url_result:
-                    logger.info(f"Fetching metadata for image: {image_url_result}")
-                    metadata = fetch_image_metadata(image_url_result)
-                    result.update(metadata)
-                results_with_metadata.append(result)
-            
-            # Rank images by file size (largest first) or by oldest published_date if size unavailable
-            ranked_results = rank_images(results_with_metadata)
-            
-            # Select top 5 images for crawling
-            top_5_images = ranked_results[:5]
-            logger.info(f"Selected top 5 images for crawling")
-            
-            # Crawl only the top 5 images
-            for image in top_5_images:
-                image_url_result = image.get('url')
-                if image_url_result:
-                    logger.info(f"Crawling image: {image_url_result}")
-                    crawl_data = crawl_image(image_url_result)
-                    image.update(crawl_data)
-            
-            # Prepare response with ALL results (not just crawled ones)
-            enriched_results = []
-            for result in ranked_results:
-                is_crawled = result.get("crawl_status") is not None
-                enriched_results.append({
-                    "url": result.get("url", ""),
-                    "domain": result.get("domain", ""),
-                    "title": result.get("title", ""),
-                    "published_date": result.get("published_date"),
-                    "file_size_bytes": result.get("file_size_bytes"),
-                    "dimensions": result.get("dimensions"),
-                    "is_crawled": is_crawled,
-                    "crawl_status": result.get("crawl_status"),
-                    "crawl_error": result.get("crawl_error"),
-                    "crawled_at": result.get("crawled_at"),
-                    "raw_snippet": result.get("raw_snippet")
-                })
-            
-            if request.user and request.user.is_authenticated:
-                self._save_results(request.user, uploaded_image, cloudinary_public_id, image_url, query, enriched_results)
-            
+            # Return immediately with task_id
             return JsonResponse({
-                "total": len(enriched_results),
-                "results": enriched_results
-            }, status=status.HTTP_200_OK)
+                "task_id": task.id,
+                "status": "queued"
+            }, status=status.HTTP_202_ACCEPTED)
         except Exception as e:
-            logger.error(f"Error in reverse image search: {str(e)}")
+            logger.error(f"Error enqueuing reverse search task: {str(e)}")
             return JsonResponse(
                 {"error": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -520,4 +485,39 @@ class ReverseImageSearchView(GenericAPIView):
             query=query or image_url,
             results=results
         )
+
+
+class ReverseSearchProgressView(GenericAPIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, task_id):
+        def event_stream():
+            while True:
+                result = AsyncResult(task_id)
+
+                if result.state == "PENDING":
+                    yield _sse("queued", {"message": "Waiting for worker…"})
+
+                elif result.state == "PROGRESS":
+                    yield _sse("progress", result.info)
+
+                elif result.state == "SUCCESS":
+                    yield _sse("done", result.result)
+                    break
+
+                elif result.state == "FAILURE":
+                    yield _sse("error", {"error": str(result.info)})
+                    break
+
+                time.sleep(1)
+
+        return StreamingHttpResponse(
+            event_stream(),
+            content_type="text/event-stream"
+        )
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 

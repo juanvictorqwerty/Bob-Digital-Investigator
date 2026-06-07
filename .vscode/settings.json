@@ -8,5 +8,6 @@
             "connectString": "postgresql://admin:admin123@localhost:5432/bob_investigate",
             "name": "Database"
         }
-    ]
+    ],
+    "python.defaultInterpreterPath": "/home/linux/miniconda3/envs/Django/bin/python"
 }

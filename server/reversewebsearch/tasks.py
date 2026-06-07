@@ -3,6 +3,7 @@ from django.conf import settings
 from serpapi import GoogleSearch
 from .views import fetch_image_metadata, rank_images, crawl_image
 from .models import WebsearchResults
+from .data_processor import process_reverse_search_results
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_public_id):
     """
     Celery task that runs the reverse image search pipeline with progress updates.
+    Searches both Google and Yandex, then processes results through the data pipeline.
     """
     try:
         # Step 1: Running reverse image search (5%)
@@ -19,86 +21,76 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             state="PROGRESS",
             meta={
                 "step": "searching",
-                "message": "Running reverse image search…"
+                "message": "Running reverse image search on Google…"
             }
         )
 
-        # Perform reverse image search
-        params = {
-            "engine": "google_reverse_image",
-            "image_url": image_url,
-            "api_key": settings.SERPAPI_KEY,
-            "tbs": "imgo:1,qdr:y"
-        }
+        # Perform Google reverse image search
+        google_results = _perform_google_search(image_url)
         
-        search = GoogleSearch(params)
-        results = search.get_dict()
+        # Step 1b: Running Yandex reverse image search (10%)
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "step": "searching",
+                "message": "Running reverse image search on Yandex…"
+            }
+        )
         
-        formatted_results = []
+        # Perform Yandex reverse image search
+        yandex_results = _perform_yandex_search(image_url)
         
-        raw_results = []
-        if "visual_matches" in results:
-            raw_results = results["visual_matches"]
-        elif "image_results" in results:
-            raw_results = results["image_results"]
-        
-        for match in raw_results:
-            published_date = _extract_published_date(match)
-            published_date_str = _format_date_for_json(published_date)
-            domain = _extract_domain(match)
-            
-            formatted_results.append({
-                "title": match.get("title", ""),
-                "url": match.get("link", ""),
-                "domain": domain,
-                "thumbnail": match.get("thumbnail", ""),
-                "published_date": published_date_str,
-            })
+        # Combine results from both engines
+        all_raw_results = google_results + yandex_results
+        logger.info(f"Combined {len(google_results)} Google results and {len(yandex_results)} Yandex results")
 
         # Step 2: Search done (20%)
-        total_results = len(formatted_results)
+        total_results = len(all_raw_results)
         self.update_state(
             state="PROGRESS",
             meta={
                 "step": "search_done",
-                "message": f"Found {total_results} matches",
+                "message": f"Found {total_results} matches across engines",
                 "data": {"total": total_results}
             }
         )
 
-        # Step 3: Fetch metadata for each result (20-60%)
-        results_with_metadata = []
-        for i, result in enumerate(formatted_results):
-            image_url_result = result.get('url')
+        # Step 3: Process results through data pipeline (20-80%)
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "step": "processing",
+                "message": "Processing and normalizing results…"
+            }
+        )
+        
+        # Process through the data pipeline (normalize, deduplicate, enrich, score, rank)
+        processed_data = process_reverse_search_results(all_raw_results)
+        
+        # Step 4: Fetch metadata for top candidates (80-90%)
+        top_candidates = processed_data['top_candidates']
+        enriched_candidates = []
+        for i, result in enumerate(top_candidates):
+            image_url_result = result.get('image_url') or result.get('page_url')
             if image_url_result:
                 logger.info(f"Fetching metadata for image: {image_url_result}")
                 metadata = fetch_image_metadata(image_url_result)
-                result.update(metadata)
-            results_with_metadata.append(result)
+                # Merge metadata into result
+                result['image_metadata'] = metadata
+            enriched_candidates.append(result)
             
-            # Update progress (20% to 60%)
-            progress = 20 + int((i + 1) / total_results * 40)
+            # Update progress (80% to 90%)
+            progress = 80 + int((i + 1) / len(top_candidates) * 10)
             self.update_state(
                 state="PROGRESS",
                 meta={
                     "step": "metadata",
-                    "message": f"Fetching metadata ({i + 1}/{total_results})…",
-                    "data": {"current": i + 1, "total": total_results}
+                    "message": f"Fetching metadata for top candidates ({i + 1}/{len(top_candidates)})…",
+                    "data": {"current": i + 1, "total": len(top_candidates)}
                 }
             )
 
-        # Step 4: Ranking results (65%)
-        self.update_state(
-            state="PROGRESS",
-            meta={
-                "step": "ranking",
-                "message": "Ranking results…"
-            }
-        )
-        
-        ranked_results = rank_images(results_with_metadata)
-
-        # Step 5: Crawling top 5 sources (70%)
+        # Step 5: Crawling top 5 sources (90-95%)
         self.update_state(
             state="PROGRESS",
             meta={
@@ -109,19 +101,19 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
         )
 
         # Select top 5 images for crawling
-        top_5_images = ranked_results[:5]
-        logger.info(f"Selected top 5 images for crawling")
+        top_5_for_crawling = enriched_candidates[:5]
+        logger.info(f"Selected top 5 candidates for crawling")
 
-        # Crawl only the top 5 images (70-95%)
-        for j, image in enumerate(top_5_images):
-            image_url_result = image.get('url')
-            if image_url_result:
-                logger.info(f"Crawling image: {image_url_result}")
-                crawl_data = crawl_image(image_url_result)
-                image.update(crawl_data)
+        # Crawl only the top 5 images (90-95%)
+        for j, result in enumerate(top_5_for_crawling):
+            page_url = result.get('page_url') or result.get('image_url')
+            if page_url:
+                logger.info(f"Crawling URL: {page_url}")
+                crawl_data = crawl_image(page_url)
+                result['crawl_data'] = crawl_data
             
-            # Update progress (70% to 95%)
-            progress = 70 + int((j + 1) / 5 * 25)
+            # Update progress (90% to 95%)
+            progress = 90 + int((j + 1) / 5 * 5)
             self.update_state(
                 state="PROGRESS",
                 meta={
@@ -130,28 +122,13 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
                     "data": {
                         "current": j + 1,
                         "total": 5,
-                        "url": image_url_result if image_url_result else ""
+                        "url": page_url if page_url else ""
                     }
                 }
             )
 
-        # Prepare response with ALL results (not just crawled ones)
-        enriched_results = []
-        for result in ranked_results:
-            is_crawled = result.get("crawl_status") is not None
-            enriched_results.append({
-                "url": result.get("url", ""),
-                "domain": result.get("domain", ""),
-                "title": result.get("title", ""),
-                "published_date": result.get("published_date"),
-                "file_size_bytes": result.get("file_size_bytes"),
-                "dimensions": result.get("dimensions"),
-                "is_crawled": is_crawled,
-                "crawl_status": result.get("crawl_status"),
-                "crawl_error": result.get("crawl_error"),
-                "crawled_at": result.get("crawled_at"),
-                "raw_snippet": result.get("raw_snippet")
-            })
+        # Update processed data with enriched candidates
+        processed_data['top_candidates'] = enriched_candidates
 
         # Save results to database
         if user_id:
@@ -159,15 +136,12 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             User = get_user_model()
             try:
                 user = User.objects.get(id=user_id)
-                _save_results(user, None, cloudinary_public_id, image_url, query, enriched_results)
+                _save_results(user, None, cloudinary_public_id, image_url, query, processed_data)
             except User.DoesNotExist:
                 logger.warning(f"User with id {user_id} not found")
 
         # Return final payload (100%)
-        return {
-            "total": len(enriched_results),
-            "results": enriched_results
-        }
+        return processed_data
 
     except Exception as e:
         logger.error(f"Error in reverse search pipeline: {str(e)}")
@@ -176,6 +150,95 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             meta={"error": str(e)}
         )
         raise
+
+
+def _perform_google_search(image_url):
+    """
+    Perform Google reverse image search using SerpAPI.
+    Returns list of results with engine field set to 'google'.
+    """
+    params = {
+        "engine": "google_reverse_image",
+        "image_url": image_url,
+        "api_key": settings.SERPAPI_KEY,
+        "tbs": "imgo:1,qdr:y"
+    }
+    
+    search = GoogleSearch(params)
+    results = search.get_dict()
+    
+    formatted_results = []
+    
+    raw_results = []
+    if "visual_matches" in results:
+        raw_results = results["visual_matches"]
+    elif "image_results" in results:
+        raw_results = results["image_results"]
+    
+    for match in raw_results:
+        published_date = _extract_published_date(match)
+        published_date_str = _format_date_for_json(published_date)
+        domain = _extract_domain(match)
+        
+        formatted_results.append({
+            "page_url": match.get("link", ""),
+            "image_url": match.get("thumbnail", ""),
+            "title": match.get("title", ""),
+            "domain": domain,
+            "thumbnail": match.get("thumbnail", ""),
+            "publish_date": published_date_str,
+            "engine": "google",
+            "image_metadata": None,
+            "extracted_text": match.get("snippet", "")
+        })
+    
+    return formatted_results
+
+
+def _perform_yandex_search(image_url):
+    """
+    Perform Yandex reverse image search using SerpAPI.
+    Returns list of results with engine field set to 'yandex'.
+    """
+    try:
+        params = {
+            "engine": "yandex_images",
+            "image_url": image_url,
+            "api_key": settings.SERPAPI_KEY
+        }
+        
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        
+        formatted_results = []
+        
+        raw_results = []
+        if "images_results" in results:
+            raw_results = results["images_results"]
+        elif "visual_matches" in results:
+            raw_results = results["visual_matches"]
+        
+        for match in raw_results:
+            published_date = _extract_published_date(match)
+            published_date_str = _format_date_for_json(published_date)
+            domain = _extract_domain(match)
+            
+            formatted_results.append({
+                "page_url": match.get("link", ""),
+                "image_url": match.get("thumbnail", ""),
+                "title": match.get("title", ""),
+                "domain": domain,
+                "thumbnail": match.get("thumbnail", ""),
+                "publish_date": published_date_str,
+                "engine": "yandex",
+                "image_metadata": None,
+                "extracted_text": match.get("snippet", "")
+            })
+        
+        return formatted_results
+    except Exception as e:
+        logger.warning(f"Yandex search failed: {str(e)}")
+        return []
 
 
 def _extract_published_date(match):

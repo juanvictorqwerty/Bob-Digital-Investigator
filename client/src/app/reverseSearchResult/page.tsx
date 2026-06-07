@@ -5,22 +5,38 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 
 interface SearchResult {
+  page_url: string;
+  image_url: string;
   title: string;
-  url: string;
   domain: string;
-  thumbnail?: string;
-  published_date: string | null;
-  is_crawled: boolean;
-  crawl_status?: string;
-  crawl_error?: string;
-  crawled_at?: string;
-  raw_snippet?: string;
-  file_size_bytes?: number | null;
-  dimensions?: { width: number; height: number } | null;
+  thumbnail: string;
+  publish_date: string | null;
+  engine: string;
+  image_metadata: any;
+  extracted_text: string;
+  score?: number;
+  crawl_data?: any;
+}
+
+interface TimelineEntry {
+  date: string;
+  domain: string;
+  url: string;
+}
+
+interface Statistics {
+  total_sources: number;
+  with_publish_date: number;
+  with_image_metadata: number;
+  unique_domains: number;
+  trusted_domains: number;
 }
 
 interface Results {
-  results: SearchResult[];
+  normalized_results: SearchResult[];
+  top_candidates: SearchResult[];
+  timeline: TimelineEntry[];
+  statistics: Statistics;
   uploaded_image?: string; // Base64 of uploaded image
 }
 
@@ -127,25 +143,26 @@ export default function ReverseSearchResult() {
     );
   }
 
-  const items: SearchResult[] = results.results ?? [];
+  const items: SearchResult[] = results.normalized_results ?? [];
+  const stats = results.statistics ?? { total_sources: 0, with_publish_date: 0, with_image_metadata: 0, unique_domains: 0, trusted_domains: 0 };
+  const timeline = results.timeline ?? [];
 
   // Sort: dated items first (oldest → newest), then undated
   const sorted = [...items].sort((a, b) => {
-    if (a.published_date && b.published_date)
-      return new Date(a.published_date).getTime() - new Date(b.published_date).getTime();
-    if (a.published_date) return -1;
-    if (b.published_date) return 1;
-    return 0;
+    if (a.publish_date && b.publish_date)
+      return new Date(a.publish_date).getTime() - new Date(b.publish_date).getTime();
+    if (a.publish_date) return -1;
+    if (b.publish_date) return 1;
+    return (b.score || 0) - (a.score || 0); // Sort by score if no dates
   });
 
-  const oldestDatedIndex = sorted.findIndex((r) => r.published_date);
+  const oldestDatedIndex = sorted.findIndex((r) => r.publish_date);
 
   // Images: keep original ordering to find "oldest" by array position
   const withImages = items.filter((r) => r.thumbnail);
 
-  // Stats
-  const crawledCount = items.filter((r) => r.is_crawled).length;
-  const datedCount = items.filter((r) => r.published_date).length;
+  // Stats from new format
+  const crawledCount = items.filter((r) => r.crawl_data && r.crawl_data.crawl_status === "success").length;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -173,7 +190,7 @@ export default function ReverseSearchResult() {
                   Reverse Image Search
                 </h1>
                 <p className="text-sm text-gray-500 mt-1">
-                  Found {items.length} results · Sorted by oldest first
+                  Found {stats.total_sources} results across Google & Yandex · Sorted by relevance
                 </p>
               </div>
             </div>
@@ -187,12 +204,13 @@ export default function ReverseSearchResult() {
         </div>
 
         {/* Stats Cards - Modern Design */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           {[
-            { label: "Total Matches", value: items.length, icon: "🔍", color: "from-blue-500 to-blue-600" },
-            { label: "Crawled Pages", value: crawledCount, icon: "🕷️", color: "from-green-500 to-green-600" },
-            { label: "With Date", value: datedCount, icon: "📅", color: "from-purple-500 to-purple-600" },
-            { label: "With Images", value: withImages.length, icon: "🖼️", color: "from-orange-500 to-orange-600" },
+            { label: "Total Sources", value: stats.total_sources, icon: "🔍", color: "from-blue-500 to-blue-600" },
+            { label: "With Date", value: stats.with_publish_date, icon: "�", color: "from-purple-500 to-purple-600" },
+            { label: "With Metadata", value: stats.with_image_metadata, icon: "�", color: "from-green-500 to-green-600" },
+            { label: "Unique Domains", value: stats.unique_domains, icon: "🌐", color: "from-orange-500 to-orange-600" },
+            { label: "Trusted Sites", value: stats.trusted_domains, icon: "✅", color: "from-teal-500 to-teal-600" },
           ].map((s) => (
             <div key={s.label} className="group relative overflow-hidden bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300">
               <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${s.color} opacity-5 rounded-full transform translate-x-16 -translate-y-16 group-hover:scale-150 transition-transform duration-500`}></div>
@@ -205,19 +223,64 @@ export default function ReverseSearchResult() {
           ))}
         </div>
 
+        {/* Timeline Section */}
+        {timeline.length > 0 && (
+          <div className="mb-12">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                📅 Timeline
+                <span className="text-xs font-normal text-gray-500 bg-white px-2 py-0.5 rounded-full">
+                  {timeline.length} entries
+                </span>
+              </h2>
+            </div>
+            
+            <div className="bg-white rounded-2xl border border-gray-100 p-6">
+              <div className="relative">
+                {/* Timeline line */}
+                <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-500 to-purple-500"></div>
+                
+                <div className="space-y-4">
+                  {timeline.map((entry, i) => (
+                    <div key={i} className="relative flex items-start gap-4 pl-10">
+                      {/* Timeline dot */}
+                      <div className={`absolute left-2 w-5 h-5 rounded-full border-4 border-white ${
+                        i === 0 ? 'bg-blue-500' : i === timeline.length - 1 ? 'bg-purple-500' : 'bg-gray-300'
+                      }`}></div>
+                      
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-800">{formatDate(entry.date)}</p>
+                        <p className="text-xs text-gray-500">{entry.domain}</p>
+                        <a
+                          href={entry.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-700 mt-1 inline-block"
+                        >
+                          View source →
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Results list - Modern Cards */}
         <div className="mb-12">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900">Search Results</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Top Candidates</h2>
             <span className="text-xs text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">
-              Sorted by date (oldest first)
+              Sorted by relevance
             </span>
           </div>
           
           <div className="grid gap-3">
-            {sorted.map((r, i) => (
+            {sorted.slice(0, 20).map((r, i) => (
               <div
-                key={r.url}
+                key={r.page_url}
                 className="group bg-white rounded-xl hover:rounded-2xl border border-gray-100 hover:border-gray-200 transition-all duration-300 p-4 flex items-start gap-4 shadow-sm hover:shadow-md"
               >
                 {/* Icon */}
@@ -227,9 +290,21 @@ export default function ReverseSearchResult() {
 
                 {/* Body */}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-gray-500 mb-1 font-mono">{r.domain}</p>
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-xs text-gray-500 font-mono">{r.domain}</p>
+                    {r.engine && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 capitalize">
+                        {r.engine}
+                      </span>
+                    )}
+                    {r.score !== undefined && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">
+                        Score: {r.score}
+                      </span>
+                    )}
+                  </div>
                   <a
-                    href={r.url}
+                    href={r.page_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm font-medium text-gray-800 hover:text-blue-600 transition-colors line-clamp-2"
@@ -240,18 +315,18 @@ export default function ReverseSearchResult() {
                   <div className="flex flex-wrap items-center gap-2 mt-3">
                     {/* Date badge */}
                     <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">
-                      📅 {formatDate(r.published_date)}
+                      📅 {formatDate(r.publish_date)}
                     </span>
 
                     {/* Crawl status */}
-                    {r.is_crawled ? (
-                      r.crawl_status === "success" ? (
+                    {r.crawl_data ? (
+                      r.crawl_data.crawl_status === "success" ? (
                         <span className="text-xs px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-100">
                           ✓ crawled
                         </span>
                       ) : (
                         <span className="text-xs px-2.5 py-1 rounded-full bg-red-50 text-red-600 border border-red-100">
-                          ✗ {r.crawl_error ?? "failed"}
+                          ✗ {r.crawl_data.crawl_error ?? "failed"}
                         </span>
                       )
                     ) : (
@@ -295,7 +370,7 @@ export default function ReverseSearchResult() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {withImages.map((r, i) => (
                 <div
-                  key={r.url}
+                  key={r.page_url}
                   className={`group relative bg-white rounded-xl overflow-hidden border transition-all duration-300 hover:shadow-lg hover:-translate-y-1 ${
                     i === 0
                       ? "border-amber-300 ring-2 ring-amber-200"
@@ -321,7 +396,7 @@ export default function ReverseSearchResult() {
                   
                   {/* Hover overlay with link */}
                   <a
-                    href={r.url}
+                    href={r.page_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-300 flex items-center justify-center"

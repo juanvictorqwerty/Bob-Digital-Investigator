@@ -44,3 +44,9 @@ class ReverseImageSearchSerializer(serializers.ModelSerializer):
                 {"non_field_errors": ["Provide either image_url or image, not both."]}
             )
         return data
+
+
+class HistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model=WebsearchResults
+        fields=['alias',"user"]

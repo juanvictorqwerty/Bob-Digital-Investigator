@@ -95,29 +95,6 @@ class ReverseImageSearchView(GenericAPIView):
         
         return result["secure_url"], result["public_id"]
 
-    def _perform_reverse_search(self, image_url):
-        # ... keep existing implementation ...
-        pass
-
-    def _format_date_for_json(self, date_obj):
-        # ... keep existing implementation ...
-        pass
-
-    def _extract_published_date(self, match):
-        # ... keep existing implementation ...
-        pass
-
-    def _parse_date(self, date_value):
-        # ... keep existing implementation ...
-        pass
-
-    def _parse_date_from_snippet(self, snippet):
-        # ... keep existing implementation ...
-        pass
-
-    def _extract_domain(self, match):
-        # ... keep existing implementation ...
-        pass
 
     def _save_results(self, user, uploaded_image, cloudinary_public_id, image_url, query, results):
         image_value = cloudinary_public_id if cloudinary_public_id else uploaded_image
@@ -184,6 +161,9 @@ class ReverseSearchProgressView(View):
             content_type="text/event-stream"
         )
 
+class HistoryView(View):
+    def get(self,user_id):
+        pass
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"

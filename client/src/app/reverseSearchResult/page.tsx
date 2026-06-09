@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import HistoryBlock from "@/components/HistoryBlock";
 
 interface SearchResult {
   page_url: string;
@@ -64,7 +65,7 @@ function formatDate(dateStr: string | null): string {
 // Beautiful Loading Screen Component
 function LoadingScreen() {
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-gray-50 via-white to-gray-50 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 bg-linear-to-br from-gray-50 via-white to-gray-50 z-50 flex items-center justify-center">
       <div className="relative">
         {/* Animated rings */}
         <div className="absolute inset-0 flex items-center justify-center">
@@ -127,14 +128,14 @@ export default function ReverseSearchResult() {
 
   if (!results) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-center px-4">
+      <main className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-center px-4">
         <div className="text-center">
           <div className="text-6xl mb-6">🔍</div>
           <h1 className="text-2xl font-semibold text-gray-800 mb-3">No results found</h1>
           <p className="text-gray-500 mb-8">Try uploading a different image or check back later</p>
           <button
             onClick={() => router.push("/")}
-            className="rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3 text-sm font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl"
+            className="rounded-xl bg-linear-to-r from-blue-600 to-blue-700 px-6 py-3 text-sm font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl"
           >
             Back to home
           </button>
@@ -165,7 +166,13 @@ export default function ReverseSearchResult() {
   const crawledCount = items.filter((r) => r.crawl_data && r.crawl_data.crawl_status === "success").length;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <main className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100">
+
+      <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400">
+                  <HistoryBlock/>
+      </div>
+       
+
       <div className="max-w-6xl mx-auto px-4 py-8">
         
         {/* Header with uploaded image preview */}
@@ -186,7 +193,7 @@ export default function ReverseSearchResult() {
                 </div>
               )}
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
+                <h1 className="text-2xl font-bold text-gray-900 bg-linear-to-r from-gray-900 to-gray-600 bg-clip-text">
                   Reverse Image Search
                 </h1>
                 <p className="text-sm text-gray-500 mt-1">
@@ -213,7 +220,7 @@ export default function ReverseSearchResult() {
             { label: "Trusted Sites", value: stats.trusted_domains, icon: "✅", color: "from-teal-500 to-teal-600" },
           ].map((s) => (
             <div key={s.label} className="group relative overflow-hidden bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300">
-              <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${s.color} opacity-5 rounded-full transform translate-x-16 -translate-y-16 group-hover:scale-150 transition-transform duration-500`}></div>
+              <div className={`absolute top-0 right-0 w-32 h-32 bg-linear-to-br ${s.color} opacity-5 rounded-full transform translate-x-16 -translate-y-16 group-hover:scale-150 transition-transform duration-500`}></div>
               <div className="relative p-5">
                 <div className="text-3xl mb-2">{s.icon}</div>
                 <p className="text-2xl font-bold text-gray-900">{s.value}</p>
@@ -238,7 +245,7 @@ export default function ReverseSearchResult() {
             <div className="bg-white rounded-2xl border border-gray-100 p-6">
               <div className="relative">
                 {/* Timeline line */}
-                <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-500 to-purple-500"></div>
+                <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-linear-to-b from-blue-500 to-purple-500"></div>
                 
                 <div className="space-y-4">
                   {timeline.map((entry, i) => (
@@ -284,7 +291,7 @@ export default function ReverseSearchResult() {
                 className="group bg-white rounded-xl hover:rounded-2xl border border-gray-100 hover:border-gray-200 transition-all duration-300 p-4 flex items-start gap-4 shadow-sm hover:shadow-md"
               >
                 {/* Icon */}
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-100 flex items-center justify-center text-lg flex-shrink-0 group-hover:scale-110 transition-transform">
+                <div className="w-10 h-10 rounded-xl bg-linear-to-br from-gray-50 to-gray-100 border border-gray-100 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
                   {domainIcon(r.domain)}
                 </div>
 

@@ -1,7 +1,7 @@
 from celery import shared_task
 from django.conf import settings
 from serpapi import GoogleSearch
-from .views import fetch_image_metadata, rank_images, crawl_image
+from .utils import fetch_image_metadata, rank_images, crawl_image
 from .models import WebsearchResults
 from .data_processor import process_reverse_search_results
 import logging

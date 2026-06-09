@@ -6,12 +6,6 @@ import { useState } from "react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 
-interface ProgressUpdate {
-  step: string;
-  message: string;
-  data?: any;
-}
-
 export default function Home() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -21,42 +15,69 @@ export default function Home() {
 
   const handleMediaSelect = (file: File | null) => {
     setSelectedFile(file);
-    console.log("Selected file captured in parent:", file);
   };
 
   const pollProgress = async (taskId: string, token: string): Promise<any> => {
-    const eventSource = new EventSource(
+    const response = await fetch(
       `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/reverse-search/progress/${taskId}/`,
       {
         headers: {
-          "Authorization": `Token ${token}`
-        }
-      } as any
+          "Authorization": `Token ${token}`,
+          "Accept": "text/event-stream",
+        },
+      }
     );
 
+    if (!response.ok) {
+      throw new Error(`SSE connection failed: ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
     return new Promise((resolve, reject) => {
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        
-        if (event.type === "progress") {
-          setProgress(data.message);
-          setProgressStep(data.step);
-        } else if (event.type === "done") {
-          eventSource.close();
-          resolve(data);
-        } else if (event.type === "error") {
-          eventSource.close();
-          reject(new Error(data.error));
-        } else if (event.type === "queued") {
-          setProgress(data.message);
-          setProgressStep("queued");
+      const read = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop() ?? "";
+
+            for (const block of parts) {
+              const eventMatch = block.match(/^event: (.+)$/m);
+              const dataMatch = block.match(/^data: (.+)$/m);
+              if (!dataMatch) continue;
+
+              const event = eventMatch?.[1]?.trim() ?? "message";
+              const data = JSON.parse(dataMatch[1]);
+
+              if (event === "progress") {
+                setProgress(data.message);
+                setProgressStep(data.step);
+              } else if (event === "queued") {
+                setProgress(data.message);
+                setProgressStep("queued");
+              } else if (event === "done") {
+                reader.cancel();
+                resolve(data);
+                return;
+              } else if (event === "error") {
+                reader.cancel();
+                reject(new Error(data.error));
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          reject(err);
         }
       };
 
-      eventSource.onerror = (error) => {
-        eventSource.close();
-        reject(error);
-      };
+      read();
     });
   };
 
@@ -67,7 +88,6 @@ export default function Home() {
     setProgress("Uploading image...");
 
     try {
-      // Convert image to base64 for caching
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
@@ -75,7 +95,6 @@ export default function Home() {
         reader.readAsDataURL(selectedFile);
       });
 
-      // Create formdata to upload the file
       const formData = new FormData();
       formData.append("image", selectedFile);
       const token = Cookies.get("token");
@@ -84,7 +103,7 @@ export default function Home() {
         method: "POST",
         body: formData,
         headers: {
-          "Authorization": `Token ${token}`
+          "Authorization": `Token ${token}`,
         },
       });
 
@@ -94,55 +113,36 @@ export default function Home() {
         setProgress("");
         return;
       }
-      
+
       const data = await response.json();
-      
+
       if (data.task_id) {
-        // Async mode - poll for progress
         setProgress("Queued for processing...");
         setProgressStep("queued");
-        
+
         try {
           const results = await pollProgress(data.task_id, token || "");
-          
-          // Add the uploaded image base64 to the results for caching
-          const resultsWithImage = {
-            ...results,
-            uploaded_image: base64Image
-          };
-          
-          console.log(results);
-          setIsUploading(false);
-          setProgress("");
-          
-          // Store results with cached image in sessionStorage and navigate to results page
-          sessionStorage.setItem('searchResults', JSON.stringify(resultsWithImage));
-          router.push('/reverseSearchResult');
+
+          const resultsWithImage = { ...results, uploaded_image: base64Image };
+
+          sessionStorage.setItem("searchResults", JSON.stringify(resultsWithImage));
+          router.push("/reverseSearchResult");
         } catch (error) {
           console.error(error);
-          setIsUploading(false);
-          setProgress("");
           alert("An error occurred during processing");
         }
       } else {
-        // Fallback for sync mode (if needed)
-        const resultsWithImage = {
-          ...data,
-          uploaded_image: base64Image
-        };
-        
-        console.log(data);
-        setIsUploading(false);
-        setProgress("");
-        
-        sessionStorage.setItem('searchResults', JSON.stringify(resultsWithImage));
-        router.push('/reverseSearchResult');
+        const resultsWithImage = { ...data, uploaded_image: base64Image };
+        sessionStorage.setItem("searchResults", JSON.stringify(resultsWithImage));
+        router.push("/reverseSearchResult");
       }
     } catch (error) {
       console.error(error);
+      alert("An error occurred during upload");
+    } finally {
       setIsUploading(false);
       setProgress("");
-      alert("An error occurred during upload");
+      setProgressStep("");
     }
   };
 
@@ -156,7 +156,7 @@ export default function Home() {
 
           {selectedFile && (
             <div className="mt-6 w-full max-w-md mx-auto">
-              <button 
+              <button
                 onClick={handleSubmit}
                 className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3 font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={isUploading}
@@ -173,7 +173,7 @@ export default function Home() {
                   "Investigate File"
                 )}
               </button>
-              
+
               {progress && (
                 <div className="mt-3 text-center">
                   <p className="text-sm text-gray-600">{progress}</p>

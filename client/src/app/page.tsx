@@ -5,6 +5,7 @@ import UploadCard from "@/components/UploadCard";
 import { useState } from "react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
+import HistoryBlock from "@/components/HistoryBlock";
 
 export default function Home() {
   const router = useRouter();
@@ -148,8 +149,13 @@ export default function Home() {
 
   return (
     <>
-      <main className={BackGroundColor}>
-        <div className="min-h-screen flex flex-col items-center justify-center px-4">
+      <main className={`${BackGroundColor} grid grid-cols-4 h-screen`}>
+
+        <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400">
+            <HistoryBlock/>
+        </div>
+ 
+        <div className="min-h-screen flex flex-col items-center justify-center px-4 col-span-3 overflow-auto">
           <div className="w-full max-w-md mx-auto">
             <UploadCard onFileSelect={handleMediaSelect} />
           </div>
@@ -158,7 +164,7 @@ export default function Home() {
             <div className="mt-6 w-full max-w-md mx-auto">
               <button
                 onClick={handleSubmit}
-                className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3 font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full rounded-xl bg-linear-to-r from-blue-600 to-blue-700 px-6 py-3 font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={isUploading}
               >
                 {isUploading ? (

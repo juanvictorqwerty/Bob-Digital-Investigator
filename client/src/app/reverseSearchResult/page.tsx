@@ -166,14 +166,14 @@ export default function ReverseSearchResult() {
   const crawledCount = items.filter((r) => r.crawl_data && r.crawl_data.crawl_status === "success").length;
 
   return (
-    <main className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100">
+    <main className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 grid grid-cols-4">
 
       <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400">
                   <HistoryBlock/>
       </div>
        
 
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-8 col-span-3">
         
         {/* Header with uploaded image preview */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">

@@ -119,7 +119,7 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
   };
 
   return (
-    <main className={`${BackGroundColor} w-full h-screen p-2 hover:bg-gray-100 flex flex-col`}>
+    <main className={`${BackGroundColor} w-full h-full p-2 hover:bg-gray-100 flex flex-col`}>
       <h1 className="mx-auto bg-blue-300 text-center p-2 font-bold rounded drop-shadow-blue-400 mb-4">
         Bob Digital Investigator
       </h1>

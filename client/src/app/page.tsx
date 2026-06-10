@@ -172,7 +172,7 @@ export default function Home() {
             />
         </div>
  
-        <div className="min-h-screen flex flex-col col-span-3 overflow-auto">
+        <div className="h-full flex flex-col justify-center items-center col-span-3 overflow-auto">
           {historyResults ? (
             <>
               {/* Ribbon bar with image and alias */}

@@ -4,13 +4,15 @@ import { useState, useRef, useEffect } from 'react';
 
 interface UploadCardProps {
   onFileSelect: (file: File | null) => void;
+  onQueryChange?: (query: string) => void;
 }
 
-export default function UploadCard({ onFileSelect }: UploadCardProps) {
+export default function UploadCard({ onFileSelect, onQueryChange }: UploadCardProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<string | null>(null);
+  const [query, setQuery] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Clean up the object URL whenever the file changes or component unmounts to prevent memory leaks
@@ -89,6 +91,12 @@ export default function UploadCard({ onFileSelect }: UploadCardProps) {
     onFileSelect(file);
     
     e.target.value = '';
+  };
+
+  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setQuery(value);
+    if (onQueryChange) onQueryChange(value);
   };
 
   const removeSelectedFile = () => {
@@ -187,6 +195,21 @@ export default function UploadCard({ onFileSelect }: UploadCardProps) {
             </div>
           </div>
         )}
+
+        {/* Optional Query Text Input */}
+        <div className="mt-4">
+          <label htmlFor="query-input" className="block text-xs font-medium text-slate-500 mb-1.5">
+            What claim are you investigating? <span className="text-slate-400">(optional)</span>
+          </label>
+          <input
+            id="query-input"
+            type="text"
+            value={query}
+            onChange={handleQueryChange}
+            placeholder="e.g. Is this image showing a real protest?"
+            className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400 transition-all"
+          />
+        </div>
 
         {error && (
           <div className="mt-3 rounded-lg bg-red-50 border border-red-100 p-3 text-center">

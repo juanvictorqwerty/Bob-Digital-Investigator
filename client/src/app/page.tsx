@@ -11,6 +11,7 @@ import ResultsView from "@/components/ResultsView";
 export default function Home() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [query, setQuery] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState<string>("");
   const [progressStep, setProgressStep] = useState<string>("");
@@ -20,6 +21,10 @@ export default function Home() {
 
   const handleMediaSelect = (file: File | null) => {
     setSelectedFile(file);
+  };
+
+  const handleQueryChange = (q: string) => {
+    setQuery(q);
   };
 
   const handleSelectResult = (results: any, alias: string, imageUrl: string) => {
@@ -108,6 +113,9 @@ export default function Home() {
 
       const formData = new FormData();
       formData.append("image", selectedFile);
+      if (query.trim()) {
+        formData.append("query", query.trim());
+      }
       const token = Cookies.get("token");
 
       const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/reverse-search/`, {
@@ -134,7 +142,7 @@ export default function Home() {
         try {
           const results = await pollProgress(data.task_id, token || "");
 
-          const resultsWithImage = { ...results, uploaded_image: base64Image };
+          const resultsWithImage = { ...results, uploaded_image: base64Image, query: query.trim() };
 
           sessionStorage.setItem("searchResults", JSON.stringify(resultsWithImage));
           router.push("/reverseSearchResult");
@@ -143,7 +151,7 @@ export default function Home() {
           alert("An error occurred during processing");
         }
       } else {
-        const resultsWithImage = { ...data, uploaded_image: base64Image };
+        const resultsWithImage = { ...data, uploaded_image: base64Image, query: query.trim() };
         sessionStorage.setItem("searchResults", JSON.stringify(resultsWithImage));
         router.push("/reverseSearchResult");
       }
@@ -219,7 +227,7 @@ export default function Home() {
           ) : (
             <>
               <div className="w-full max-w-md mx-auto">
-                <UploadCard onFileSelect={handleMediaSelect} />
+                <UploadCard onFileSelect={handleMediaSelect} onQueryChange={handleQueryChange} />
               </div>
 
               {selectedFile && (

@@ -4,6 +4,7 @@ from serpapi import GoogleSearch
 from .utils import fetch_image_metadata, rank_images, crawl_image
 from .models import WebsearchResults
 from .data_processor import process_reverse_search_results
+from robot.analysis_pipeline import run_robot_analysis
 import logging
 
 logger = logging.getLogger(__name__)
@@ -131,14 +132,40 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
         processed_data['top_candidates'] = enriched_candidates
 
         # Save results to database
+        saved_obj = None
         if user_id:
             from django.contrib.auth import get_user_model
             User = get_user_model()
             try:
                 user = User.objects.get(id=user_id)
-                _save_results(user, None, cloudinary_public_id, image_url, query, processed_data)
+                saved_obj = _save_results(user, None, cloudinary_public_id, image_url, query, processed_data)
             except User.DoesNotExist:
                 logger.warning(f"User with id {user_id} not found")
+
+        # Step 6: Robot AI analysis (96-98%)
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "step": "analyzing",
+                "message": "Running AI fake-news analysis…"
+            }
+        )
+
+        robot_analysis = None
+        if saved_obj:
+            try:
+                robot_analysis = run_robot_analysis(saved_obj, processed_data)
+                processed_data['robot_analysis'] = robot_analysis
+                logger.info(f"Robot analysis complete: {robot_analysis.get('verdict')} @ {robot_analysis.get('confidence', 0):.0%}")
+            except Exception as e:
+                logger.error(f"Robot analysis failed: {str(e)}")
+                processed_data['robot_analysis'] = {
+                    "verdict": "unconfirmed",
+                    "confidence": 0.0,
+                    "explanation": f"AI analysis error: {str(e)}",
+                    "key_evidence": [],
+                    "llm_used": False
+                }
 
         # Return final payload (100%)
         return processed_data
@@ -374,10 +401,10 @@ def _extract_domain(match):
 
 
 def _save_results(user, uploaded_image, cloudinary_public_id, image_url, query, results):
-    """Save search results to database."""
+    """Save search results to database and return the created instance."""
     image_value = cloudinary_public_id if cloudinary_public_id else uploaded_image
     
-    WebsearchResults.objects.create(
+    return WebsearchResults.objects.create(
         user=user,
         image=image_value,
         query=query or image_url,

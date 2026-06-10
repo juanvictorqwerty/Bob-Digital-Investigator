@@ -11,3 +11,4 @@ beautifulsoup4
 celery>=5.3
 redis>=5.0
 django-redis>=5.4
+openai>=1.0.0

@@ -28,12 +28,23 @@ interface Statistics {
   trusted_domains: number;
 }
 
+interface RobotAnalysisData {
+  verdict: "real" | "fake" | "suspicious" | "unconfirmed";
+  confidence: number;
+  short_summary: string;
+  explanation: string;
+  key_evidence: string[];
+  llm_used: boolean;
+}
+
 interface ResultsData {
   normalized_results?: SearchResult[];
   top_candidates?: SearchResult[];
   timeline?: TimelineEntry[];
   statistics?: Statistics;
   uploaded_image?: string;
+  query?: string;
+  robot_analysis?: RobotAnalysisData;
 }
 
 interface ResultsViewProps {
@@ -64,6 +75,13 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+const VERDICT_CONFIG: Record<string, { icon: string; label: string; bg: string; border: string; text: string }> = {
+  real:        { icon: "🛡️", label: "Real News",     bg: "bg-green-50",   border: "border-green-300",  text: "text-green-800" },
+  fake:        { icon: "🚨", label: "Fake News",     bg: "bg-red-50",     border: "border-red-300",    text: "text-red-800" },
+  suspicious:  { icon: "⚠️", label: "Suspicious",    bg: "bg-amber-50",   border: "border-amber-300",  text: "text-amber-800" },
+  unconfirmed: { icon: "❓", label: "Unconfirmed",   bg: "bg-gray-50",    border: "border-gray-300",   text: "text-gray-700" },
+};
+
 export default function ResultsView({ results, alias, imageUrl, onBack }: ResultsViewProps) {
   const items: SearchResult[] = results.normalized_results ?? [];
   const stats = results.statistics ?? {
@@ -74,6 +92,8 @@ export default function ResultsView({ results, alias, imageUrl, onBack }: Result
     trusted_domains: 0,
   };
   const timeline = results.timeline ?? [];
+  const robot = results.robot_analysis ?? null;
+  const userClaim = results.query ?? "";
 
   // Sort: dated items first (oldest → newest), then undated
   const sorted = [...items].sort((a, b) => {
@@ -87,8 +107,92 @@ export default function ResultsView({ results, alias, imageUrl, onBack }: Result
   const oldestDatedIndex = sorted.findIndex((r) => r.publish_date);
   const withImages = items.filter((r) => r.thumbnail);
 
+  // Confidence color
+  function confidenceColor(score: number): string {
+    if (score >= 0.8) return "bg-green-500";
+    if (score >= 0.6) return "bg-emerald-500";
+    if (score >= 0.4) return "bg-amber-500";
+    return "bg-red-500";
+  }
+
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-8">
+      {/* Input Evidence Cards */}
+      <div className="mb-6 flex flex-col sm:flex-row gap-4">
+        {/* Uploaded Image */}
+        {imageUrl && (
+          <div className="flex-1 rounded-xl border border-purple-200 bg-purple-50 p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="text-xl shrink-0 mt-0.5">🖼️</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider mb-2">Input Image</p>
+                <img
+                  src={imageUrl}
+                  alt="Uploaded search image"
+                  className="w-full max-h-40 object-contain rounded-lg border border-purple-200 bg-white"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* User's Claim / Query Text */}
+        {userClaim && (
+          <div className="flex-1 rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="text-xl shrink-0 mt-0.5">📝</span>
+              <div>
+                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-1">Claim being investigated</p>
+                <p className="text-sm text-blue-900 italic leading-relaxed">"{userClaim}"</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Robot Verdict Banner */}
+      {robot && (() => {
+        const cfg = VERDICT_CONFIG[robot.verdict] ?? VERDICT_CONFIG.unconfirmed;
+        return (
+          <div className={`mb-8 rounded-2xl border-2 ${cfg.border} ${cfg.bg} p-6 shadow-sm transition-all hover:shadow-md`}>
+            <div className="flex items-start gap-4">
+              <div className="text-4xl shrink-0">{cfg.icon}</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 flex-wrap mb-2">
+                  <span className={`text-lg font-bold ${cfg.text}`}>{cfg.label}</span>
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${cfg.bg} ${cfg.text} border ${cfg.border}`}>
+                    <span className={`w-2 h-2 rounded-full ${confidenceColor(robot.confidence)}`}></span>
+                    {Math.round(robot.confidence * 100)}% confidence
+                  </span>
+                  {!robot.llm_used && (
+                    <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 font-medium">
+                      Rules-based
+                    </span>
+                  )}
+                </div>
+                {robot.short_summary && (
+                  <p className={`text-sm font-medium ${cfg.text} mb-2`}>{robot.short_summary}</p>
+                )}
+                <p className="text-sm text-gray-600 leading-relaxed">{robot.explanation}</p>
+                {robot.key_evidence && robot.key_evidence.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Key Evidence</p>
+                    <ul className="space-y-1">
+                      {robot.key_evidence.map((ev, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                          <span className="text-gray-400 mt-0.5 shrink-0">•</span>
+                          <span>{ev}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Stats summary line */}
       <p className="text-sm text-gray-500 mb-6">
         Found {stats.total_sources} results across Google & Yandex · Sorted by relevance

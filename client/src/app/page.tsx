@@ -162,21 +162,60 @@ export default function Home() {
       <main className={`${BackGroundColor} grid grid-cols-4 h-screen`}>
 
         <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400">
-            <HistoryBlock onSelectResult={handleSelectResult}/>
-        </div>
- 
-        <div className="min-h-screen flex flex-col items-center justify-center px-4 col-span-3 overflow-auto">
-          {historyResults ? (
-            <ResultsView
-              results={historyResults}
-              alias={historyAlias}
-              imageUrl={historyImageUrl}
-              onBack={() => {
-                setHistoryResults(null);
-                setHistoryAlias("");
-                setHistoryImageUrl("");
+            <HistoryBlock
+              onSelectResult={handleSelectResult}
+              onAliasUpdate={(id, newAlias) => {
+                if (historyAlias && id) {
+                  setHistoryAlias(newAlias);
+                }
               }}
             />
+        </div>
+ 
+        <div className="min-h-screen flex flex-col col-span-3 overflow-auto">
+          {historyResults ? (
+            <>
+              {/* Ribbon bar with image and alias */}
+              <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm px-6 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {historyImageUrl && (
+                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 ring-2 ring-blue-500 ring-offset-1 shrink-0">
+                      <img
+                        src={historyImageUrl}
+                        alt="Uploaded"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <h2 className="text-base font-semibold text-gray-900">{historyAlias || "Reverse Image Search"}</h2>
+                    <p className="text-xs text-gray-500">Viewing search results</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setHistoryResults(null);
+                    setHistoryAlias("");
+                    setHistoryImageUrl("");
+                  }}
+                  className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+                >
+                  New Search
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto px-4">
+                <ResultsView
+                  results={historyResults}
+                  alias={historyAlias}
+                  imageUrl={historyImageUrl}
+                  onBack={() => {
+                    setHistoryResults(null);
+                    setHistoryAlias("");
+                    setHistoryImageUrl("");
+                  }}
+                />
+              </div>
+            </>
           ) : (
             <>
               <div className="w-full max-w-md mx-auto">

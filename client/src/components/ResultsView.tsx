@@ -89,40 +89,10 @@ export default function ResultsView({ results, alias, imageUrl, onBack }: Result
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-8">
-      {/* Header with uploaded image preview */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            {/* Image Display */}
-            {imageUrl && (
-              <div className="relative">
-                <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 ring-2 ring-blue-500 ring-offset-2">
-                  <img
-                    src={imageUrl}
-                    alt="Uploaded"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full border-2 border-white"></div>
-              </div>
-            )}
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 bg-linear-to-r from-gray-900 to-gray-600 bg-clip-text">
-                {alias || "Reverse Image Search"}
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Found {stats.total_sources} results across Google & Yandex · Sorted by relevance
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onBack}
-            className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
-          >
-            Back
-          </button>
-        </div>
-      </div>
+      {/* Stats summary line */}
+      <p className="text-sm text-gray-500 mb-6">
+        Found {stats.total_sources} results across Google & Yandex · Sorted by relevance
+      </p>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">

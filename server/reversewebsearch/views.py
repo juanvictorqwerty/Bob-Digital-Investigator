@@ -2,6 +2,8 @@
 from django.conf import settings
 from django.http import JsonResponse, StreamingHttpResponse
 from django.views import View  # Add this
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.generics import GenericAPIView
 from rest_framework import status
 from rest_framework.response import Response
@@ -214,10 +216,20 @@ class HistoryDetailView(View):
         return JsonResponse(serializer.data)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class HistoryAliasUpdateView(View):
     """
     Update the alias (editable name) of a search result.
+    Uses csrf_exempt because authentication is via token, not session cookies.
     """
+    def options(self, request, *args, **kwargs):
+        """Handle CORS preflight requests."""
+        response = JsonResponse({})
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "GET, OPTIONS, PATCH"
+        response["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        return response
+
     def patch(self, request, pk):
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Token '):

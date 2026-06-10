@@ -15,9 +15,10 @@ interface HistoryItem {
 
 interface HistoryBlockProps {
   onSelectResult?: (results: any, alias: string, imageUrl: string) => void;
+  onAliasUpdate?: (id: string, newAlias: string) => void;
 }
 
-export default function HistoryBlock({ onSelectResult }: HistoryBlockProps) {
+export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryBlockProps) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>("");
@@ -76,6 +77,7 @@ export default function HistoryBlock({ onSelectResult }: HistoryBlockProps) {
             item.id === id ? { ...item, alias: editValue } : item
           )
         );
+        onAliasUpdate?.(id, editValue);
       }
     } catch (err) {
       console.error("Failed to update alias:", err);
@@ -160,12 +162,12 @@ export default function HistoryBlock({ onSelectResult }: HistoryBlockProps) {
               {/* Alias and date */}
               <div className="flex-1 min-w-0">
                 {editingId === item.id ? (
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="text"
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
-                      className="text-xs font-medium text-gray-800 border border-blue-300 rounded px-1 py-0.5 w-full outline-none focus:ring-1 focus:ring-blue-400"
+                      className="text-sm font-medium text-gray-800 border border-blue-300 rounded px-2 py-1 w-full outline-none focus:ring-2 focus:ring-blue-400"
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter") handleAliasSave(item.id);
@@ -174,15 +176,15 @@ export default function HistoryBlock({ onSelectResult }: HistoryBlockProps) {
                     />
                     <button
                       onClick={() => handleAliasSave(item.id)}
-                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      className="px-3 py-1.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-sm"
                     >
-                      ✓
+                      Save
                     </button>
                     <button
                       onClick={() => setEditingId(null)}
-                      className="text-xs text-gray-400 hover:text-gray-600"
+                      className="px-2 py-1.5 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                     >
-                      ✕
+                      Cancel
                     </button>
                   </div>
                 ) : (

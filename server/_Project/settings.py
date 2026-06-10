@@ -151,7 +151,31 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'authentication.CustomUser'
 
 CORS_ALLOWED_ORIGINS = [
-    env("FRONTEND_URL")
+    env("FRONTEND_URL"),
+    "http://localhost:3000",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    env("FRONTEND_URL"),
+    "http://localhost:3000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization",
+    "content-type",
+    "origin",
+    "x-csrftoken",
+    "x-requested-with",
 ]
 
 STORAGES = {

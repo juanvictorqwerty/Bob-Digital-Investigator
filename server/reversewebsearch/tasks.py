@@ -188,7 +188,6 @@ def _perform_google_search(image_url):
         "engine": "google_reverse_image",
         "image_url": image_url,
         "api_key": settings.SERPAPI_KEY,
-        "tbs": "imgo:1,qdr:y"
     }
     
     search = GoogleSearch(params)

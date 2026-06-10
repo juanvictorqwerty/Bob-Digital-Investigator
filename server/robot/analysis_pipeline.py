@@ -36,7 +36,7 @@ def run_robot_analysis(websearch_result, processed_data):
     statistics = processed_data.get("statistics", {})
 
     # Step 1: Run rules-based heuristics
-    rules_assessment = _rules_based_assessment(top_candidates, timeline, statistics)
+    rules_assessment = _rules_based_assessment(websearch_result, top_candidates, timeline, statistics)
     logger.info(f"Rules-based assessment: {rules_assessment}")
 
     # Step 2: Build LLM prompt
@@ -80,7 +80,7 @@ def run_robot_analysis(websearch_result, processed_data):
     return verdict_dict
 
 
-def _rules_based_assessment(top_candidates, timeline, statistics):
+def _rules_based_assessment(websearch_result, top_candidates, timeline, statistics):
     """
     Apply rules-based heuristics to flag potential issues.
 

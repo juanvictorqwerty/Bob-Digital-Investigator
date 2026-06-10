@@ -120,9 +120,62 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
 
   return (
     <main className={`${BackGroundColor} w-full h-full p-2 hover:bg-gray-100 flex flex-col`}>
-      <h1 className="mx-auto bg-blue-300 text-center p-2 font-bold rounded drop-shadow-blue-400 mb-4">
-        Bob Digital Investigator
-      </h1>
+      
+        <h1 className="relative mx-auto text-center mb-6 w-fit">
+          {/* Glow layer */}
+          <span
+            className="absolute inset-0 blur-xl opacity-60 rounded-2xl"
+            style={{ background: "linear-gradient(135deg, #6366f1, #ec4899, #06b6d4)" }}
+            aria-hidden="true"
+          />
+
+          {/* Main badge */}
+          <span
+            className="relative inline-flex items-center gap-3 px-8 py-3 rounded-2xl font-black tracking-widest uppercase text-white text-2xl"
+            style={{
+              background: "linear-gradient(135deg, #0f0c29, #302b63, #24243e)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              boxShadow:
+                "0 0 0 1px rgba(99,102,241,0.4), 0 8px 32px rgba(99,102,241,0.35), inset 0 1px 0 rgba(255,255,255,0.1)",
+              letterSpacing: "0.15em",
+            }}
+          >
+            {/* Animated accent dot */}
+            <span
+              className="w-2.5 h-2.5 rounded-full animate-pulse shrink-0"
+              style={{ background: "linear-gradient(135deg, #ec4899, #f97316)", boxShadow: "0 0 10px #ec4899" }}
+            />
+
+            {/* Stylised text */}
+            <span>
+              <span
+                style={{
+                  background: "linear-gradient(90deg, #a78bfa, #ec4899, #38bdf8)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                }}
+              >
+                Bob
+              </span>{" "}
+              <span className="text-white/90">Digital</span>{" "}
+              <span
+                style={{
+                  background: "linear-gradient(90deg, #38bdf8, #a78bfa)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                }}
+              >
+                Investigator
+              </span>
+            </span>
+
+            {/* Icon accent */}
+            <span className="text-lg shrink-0" aria-hidden="true">🔍</span>
+          </span>
+
+        </h1>
 
       <h2 className="text-sm font-semibold text-gray-700 mt-4 mb-2 px-1">
         Search History

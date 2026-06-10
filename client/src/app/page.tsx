@@ -6,6 +6,7 @@ import { useState } from "react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 import HistoryBlock from "@/components/HistoryBlock";
+import ResultsView from "@/components/ResultsView";
 
 export default function Home() {
   const router = useRouter();
@@ -13,9 +14,18 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState<string>("");
   const [progressStep, setProgressStep] = useState<string>("");
+  const [historyResults, setHistoryResults] = useState<any>(null);
+  const [historyAlias, setHistoryAlias] = useState<string>("");
+  const [historyImageUrl, setHistoryImageUrl] = useState<string>("");
 
   const handleMediaSelect = (file: File | null) => {
     setSelectedFile(file);
+  };
+
+  const handleSelectResult = (results: any, alias: string, imageUrl: string) => {
+    setHistoryResults(results);
+    setHistoryAlias(alias);
+    setHistoryImageUrl(imageUrl);
   };
 
   const pollProgress = async (taskId: string, token: string): Promise<any> => {
@@ -152,43 +162,58 @@ export default function Home() {
       <main className={`${BackGroundColor} grid grid-cols-4 h-screen`}>
 
         <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400">
-            <HistoryBlock/>
+            <HistoryBlock onSelectResult={handleSelectResult}/>
         </div>
  
         <div className="min-h-screen flex flex-col items-center justify-center px-4 col-span-3 overflow-auto">
-          <div className="w-full max-w-md mx-auto">
-            <UploadCard onFileSelect={handleMediaSelect} />
-          </div>
+          {historyResults ? (
+            <ResultsView
+              results={historyResults}
+              alias={historyAlias}
+              imageUrl={historyImageUrl}
+              onBack={() => {
+                setHistoryResults(null);
+                setHistoryAlias("");
+                setHistoryImageUrl("");
+              }}
+            />
+          ) : (
+            <>
+              <div className="w-full max-w-md mx-auto">
+                <UploadCard onFileSelect={handleMediaSelect} />
+              </div>
 
-          {selectedFile && (
-            <div className="mt-6 w-full max-w-md mx-auto">
-              <button
-                onClick={handleSubmit}
-                className="w-full rounded-xl bg-linear-to-r from-blue-600 to-blue-700 px-6 py-3 font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={isUploading}
-              >
-                {isUploading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    {progress || "Investigating..."}
-                  </span>
-                ) : (
-                  "Investigate File"
-                )}
-              </button>
+              {selectedFile && (
+                <div className="mt-6 w-full max-w-md mx-auto">
+                  <button
+                    onClick={handleSubmit}
+                    className="w-full rounded-xl bg-linear-to-r from-blue-600 to-blue-700 px-6 py-3 font-medium text-white hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isUploading}
+                  >
+                    {isUploading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        {progress || "Investigating..."}
+                      </span>
+                    ) : (
+                      "Investigate File"
+                    )}
+                  </button>
 
-              {progress && (
-                <div className="mt-3 text-center">
-                  <p className="text-sm text-gray-600">{progress}</p>
-                  {progressStep && (
-                    <p className="text-xs text-gray-400 mt-1 capitalize">{progressStep}</p>
+                  {progress && (
+                    <div className="mt-3 text-center">
+                      <p className="text-sm text-gray-600">{progress}</p>
+                      {progressStep && (
+                        <p className="text-xs text-gray-400 mt-1 capitalize">{progressStep}</p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </main>

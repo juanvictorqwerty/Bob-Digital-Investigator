@@ -9,7 +9,12 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import TokenAuthentication
 from serpapi import GoogleSearch
-from .serializers import ReverseImageSearchSerializer
+from .serializers import (
+    ReverseImageSearchSerializer,
+    WebsearchResultListSerializer,
+    WebsearchResultDetailSerializer,
+    WebsearchResultAliasSerializer,
+)
 from .models import WebsearchResults
 from .tasks import run_reverse_search_pipeline
 from .utils import fetch_image_metadata, rank_images, crawl_image
@@ -161,9 +166,87 @@ class ReverseSearchProgressView(View):
             content_type="text/event-stream"
         )
 
-class HistoryView(View):
-    def get(self,user_id):
-        pass
+class HistoryListView(View):
+    """
+    List all reverse search history items (lightweight) for the authenticated user.
+    """
+    def get(self, request):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Token '):
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        
+        token = auth_header.replace('Token ', '').strip()
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+        except Token.DoesNotExist:
+            return JsonResponse({"error": "Invalid token"}, status=401)
+
+        user = token_obj.user
+        queryset = WebsearchResults.objects.filter(user=user)
+        serializer = WebsearchResultListSerializer(queryset, many=True)
+        return JsonResponse(serializer.data, safe=False)
+
+
+class HistoryDetailView(View):
+    """
+    Retrieve full details of a single search result by its UUID.
+    """
+    def get(self, request, pk):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Token '):
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        
+        token = auth_header.replace('Token ', '').strip()
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+        except Token.DoesNotExist:
+            return JsonResponse({"error": "Invalid token"}, status=401)
+
+        user = token_obj.user
+        try:
+            obj = WebsearchResults.objects.get(pk=pk, user=user)
+        except WebsearchResults.DoesNotExist:
+            return JsonResponse({"error": "Not found"}, status=404)
+
+        serializer = WebsearchResultDetailSerializer(obj)
+        return JsonResponse(serializer.data)
+
+
+class HistoryAliasUpdateView(View):
+    """
+    Update the alias (editable name) of a search result.
+    """
+    def patch(self, request, pk):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Token '):
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        
+        token = auth_header.replace('Token ', '').strip()
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+        except Token.DoesNotExist:
+            return JsonResponse({"error": "Invalid token"}, status=401)
+
+        user = token_obj.user
+        try:
+            obj = WebsearchResults.objects.get(pk=pk, user=user)
+        except WebsearchResults.DoesNotExist:
+            return JsonResponse({"error": "Not found"}, status=404)
+
+        # Parse request body
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        serializer = WebsearchResultAliasSerializer(obj, data=body, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return JsonResponse(serializer.data)
+        return JsonResponse(serializer.errors, status=400)
 
 def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n" 

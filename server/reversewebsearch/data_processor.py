@@ -1,6 +1,7 @@
 from urllib.parse import urlparse, urlunparse, parse_qs
 from datetime import datetime
 from collections import defaultdict
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,10 +49,11 @@ def normalize_url(url):
             parsed.path,
             parsed.params,
             clean_query,
-            ''  # remove fragment
+            parsed.fragment
         ))
         
-        return normalized
+        return normalized or None
+        
     except Exception as e:
         logger.warning(f"Error normalizing URL {url}: {str(e)}")
         return url
@@ -67,25 +69,24 @@ def extract_domain(url):
     try:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
+        
+        # Remove port if present
+        if ':' in domain:
+            domain = domain.split(':')[0]
+        
+        # Remove www. prefix
         if domain.startswith('www.'):
             domain = domain[4:]
-        return domain
+        
+        return domain if domain else None
+        
     except Exception:
         return None
 
 
-def is_trusted_domain(domain):
-    """
-    Check if domain is in trusted list.
-    """
-    if not domain:
-        return False
-    return domain in TRUSTED_DOMAINS
-
-
 def normalize_results(raw_results):
     """
-    Normalize a list of results from reverse image search engines.
+    Normalize raw results into a consistent format.
     
     Args:
         raw_results: List of dicts with page_url, image_url, title, engine, etc.
@@ -209,6 +210,113 @@ def enrich_results(results):
     return enriched
 
 
+def is_miniature_or_sublink(result):
+    """
+    Detect if an image result is a miniature (thumbnail) or a sublink on a page.
+    
+    Checks multiple signals:
+    - Image metadata shows very small dimensions (< 200px in either axis)
+    - File size is tiny (< 20 KB)
+    - Image URL path contains thumbnail indicators (thumb, thumbnail, small, mini, tn)
+    - URL query params request small dimensions (w, width, s, size < 300)
+    - The 'thumbnail' field points to the same URL as 'image_url' (it's just a thumbnail ref)
+    - URL contains Google/Bing image serving size notation (=s<small number>, =w<small number>)
+    
+    Args:
+        result: Result dict with image_url, image_metadata, etc.
+    
+    Returns:
+        True if the result appears to be a miniature or sublink
+    """
+    # Check 1: Image metadata shows very small dimensions
+    metadata = result.get('image_metadata')
+    if metadata:
+        width = metadata.get('width') or (metadata.get('dimensions') or {}).get('width')
+        height = metadata.get('height') or (metadata.get('dimensions') or {}).get('height')
+        if width is not None and height is not None:
+            try:
+                w = int(width)
+                h = int(height)
+                if w < 200 or h < 200:
+                    logger.debug(f"Miniature detected: small dimensions {w}x{h}")
+                    return True
+            except (ValueError, TypeError):
+                pass
+        
+        # Also check if file_size_bytes in metadata indicates tiny file
+        file_size = metadata.get('file_size_bytes')
+        if file_size is not None and isinstance(file_size, (int, float)) and file_size < 20 * 1024:
+            logger.debug(f"Miniature detected: tiny file size {file_size} bytes")
+            return True
+    
+    # Check 2: Direct file_size_bytes on the result (may come from fetch_image_metadata merge)
+    file_size = result.get('file_size_bytes')
+    if file_size is not None and isinstance(file_size, (int, float)) and file_size < 20 * 1024:
+        logger.debug(f"Miniature detected: tiny file_size_bytes {file_size}")
+        return True
+    
+    # Check 3: Image URL contains thumbnail indicators in path
+    image_url = result.get('image_url', '') or ''
+    if image_url:
+        url_lower = image_url.lower()
+        thumbnail_path_patterns = [
+            '/thumb/', '/thumbnail/', '/small/', '/mini/',
+            '/tiny/', '/icon/', '/icons/', '/tn/',
+        ]
+        for pattern in thumbnail_path_patterns:
+            if pattern in url_lower:
+                logger.debug(f"Miniature detected: URL path '{pattern}' in {image_url}")
+                return True
+        
+        # Check filename patterns
+        filename_patterns = [
+            '_thumb', '-thumb', '.thumb',
+            '_tn', '-tn',
+            '_small', '-small',
+            '_mini', '-mini',
+            '_icon', '-icon',
+        ]
+        # Extract filename from URL
+        path_part = urlparse(image_url).path
+        for pattern in filename_patterns:
+            if pattern in path_part.lower():
+                logger.debug(f"Miniature detected: filename pattern '{pattern}' in {path_part}")
+                return True
+    
+    # Check 4: URL query params suggesting small requested size
+    if image_url:
+        try:
+            parsed = urlparse(image_url)
+            if parsed.query:
+                qs = parse_qs(parsed.query)
+                for param in ['w', 'width', 's', 'size']:
+                    if param in qs:
+                        try:
+                            val = int(qs[param][0])
+                            if val < 300:
+                                logger.debug(f"Miniature detected: {param}={val} in {image_url}")
+                                return True
+                        except (ValueError, IndexError):
+                            pass
+        except Exception:
+            pass
+    
+    # Check 5: Google/Bing style size notation (=sNNN, =wNNN-hNNN) in URL
+    if image_url:
+        size_notation = re.findall(r'[=/]s\d{2,3}[=/]?', image_url, re.IGNORECASE)
+        if size_notation:
+            logger.debug(f"Miniature detected: size notation in {image_url}")
+            return True
+    
+    # Check 6: The 'thumbnail' field matches 'image_url' — it's just a thumbnail reference
+    thumbnail = result.get('thumbnail', '') or ''
+    if thumbnail and thumbnail == result.get('image_url', ''):
+        logger.debug(f"Miniature detected: image_url matches thumbnail field")
+        return True
+    
+    return False
+
+
 def score_result(result, engine_counts):
     """
     Score a result based on available metadata and domain trust.
@@ -219,6 +327,7 @@ def score_result(result, engine_counts):
     +2 → trusted domain
     +1 → high-resolution metadata (if available)
     +1 → appears across multiple engines
+    -10 → miniature or sublink (will sink it to the bottom)
     
     Args:
         result: Result dict
@@ -254,6 +363,11 @@ def score_result(result, engine_counts):
     page_url = result.get('page_url')
     if page_url and engine_counts.get(page_url, 0) > 1:
         score += 1
+    
+    # -10 for miniature or sublink (heavy penalty to sink ranking)
+    if is_miniature_or_sublink(result):
+        score -= 10
+        logger.debug(f"Applied miniature penalty to: {result.get('image_url', '')[:80]}")
     
     return score
 
@@ -304,7 +418,7 @@ def select_top_candidates(results, limit=20):
 
 def build_timeline(results):
     """
-    Build timeline from ALL results that have publish_date.
+    Build timeline from results that have publish_date AND are not miniatures/sublinks.
     Sort chronologically (oldest → newest).
     
     Args:
@@ -316,6 +430,11 @@ def build_timeline(results):
     timeline_entries = []
     
     for result in results:
+        # Skip miniatures and sublinks — they should not appear in the timeline
+        if is_miniature_or_sublink(result):
+            logger.debug(f"Skipping miniature/sublink in timeline: {result.get('image_url', '')[:80]}")
+            continue
+        
         publish_date = result.get('publish_date')
         if publish_date:
             # Parse date if it's a string
@@ -352,9 +471,38 @@ def build_timeline(results):
     return timeline_entries
 
 
+def is_trusted_domain(domain):
+    """
+    Check if a domain is in the trusted list.
+    
+    Args:
+        domain: Domain string
+    
+    Returns:
+        Boolean
+    """
+    if not domain:
+        return False
+    
+    domain = domain.lower()
+    
+    # Direct match
+    if domain in TRUSTED_DOMAINS:
+        return True
+    
+    # Subdomain match (e.g., sub.bbc.com → bbc.com)
+    parts = domain.split('.')
+    for i in range(len(parts) - 1):
+        subdomain = '.'.join(parts[i:])
+        if subdomain in TRUSTED_DOMAINS:
+            return True
+    
+    return False
+
+
 def compute_statistics(results):
     """
-    Compute statistics about the results.
+    Compute basic statistics from ranked results.
     
     Args:
         results: List of result dicts
@@ -363,15 +511,13 @@ def compute_statistics(results):
         Dict with statistics
     """
     total_sources = len(results)
-    
     with_publish_date = sum(1 for r in results if r.get('publish_date'))
     with_image_metadata = sum(1 for r in results if r.get('image_metadata'))
-    
     unique_domains = set()
     trusted_domain_count = 0
     
-    for result in results:
-        domain = result.get('domain')
+    for r in results:
+        domain = r.get('domain')
         if domain:
             unique_domains.add(domain)
             if is_trusted_domain(domain):
@@ -417,7 +563,7 @@ def process_reverse_search_results(raw_results):
     top_candidates = select_top_candidates(ranked, limit=20)
     logger.info(f"Selected top {len(top_candidates)} candidates")
     
-    # Step 6: Build timeline
+    # Step 6: Build timeline (excludes miniatures/sublinks)
     timeline = build_timeline(ranked)
     logger.info(f"Built timeline with {len(timeline)} entries")
     

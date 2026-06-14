@@ -18,7 +18,7 @@ from .serializers import (
 )
 from .models import WebsearchResults
 from .tasks import run_reverse_search_pipeline
-from .utils import fetch_image_metadata, rank_images, crawl_image
+from .utils import fetch_image_metadata, crawl_image
 import uuid
 import logging
 import json

@@ -1,11 +1,11 @@
 from celery import shared_task
 from django.conf import settings
-from serpapi import GoogleSearch
+import requests
+import logging
 from .utils import fetch_image_metadata, rank_images, crawl_image
 from .models import WebsearchResults
 from .data_processor import process_reverse_search_results
 from robot.analysis_pipeline import run_robot_analysis
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_public_id):
     """
     Celery task that runs the reverse image search pipeline with progress updates.
-    Searches both Google and Yandex, then processes results through the data pipeline.
+    Searches using OpenWebNinja, then processes results through the data pipeline.
     """
     try:
         # Step 1: Running reverse image search (5%)
@@ -22,28 +22,13 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             state="PROGRESS",
             meta={
                 "step": "searching",
-                "message": "Running reverse image search on Google…"
+                "message": "Running reverse image search via OpenWebNinja…"
             }
         )
 
-        # Perform Google reverse image search
-        google_results = _perform_google_search(image_url)
-        
-        # Step 1b: Running Yandex reverse image search (10%)
-        self.update_state(
-            state="PROGRESS",
-            meta={
-                "step": "searching",
-                "message": "Running reverse image search on Yandex…"
-            }
-        )
-        
-        # Perform Yandex reverse image search
-        yandex_results = _perform_yandex_search(image_url)
-        
-        # Combine results from both engines
-        all_raw_results = google_results + yandex_results
-        logger.info(f"Combined {len(google_results)} Google results and {len(yandex_results)} Yandex results")
+        # Perform OpenWebNinja reverse image search
+        all_raw_results = _perform_openwebninja_search(image_url)
+        logger.info(f"Found {len(all_raw_results)} results from OpenWebNinja")
 
         # Step 2: Search done (20%)
         total_results = len(all_raw_results)
@@ -51,7 +36,7 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             state="PROGRESS",
             meta={
                 "step": "search_done",
-                "message": f"Found {total_results} matches across engines",
+                "message": f"Found {total_results} matches",
                 "data": {"total": total_results}
             }
         )
@@ -179,92 +164,75 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
         raise
 
 
-def _perform_google_search(image_url):
+def _perform_openwebninja_search(image_url):
     """
-    Perform Google reverse image search using SerpAPI.
-    Returns list of results with engine field set to 'google'.
+    Perform reverse image search using OpenWebNinja API.
+    Returns list of results with engine field set to 'openwebninja'.
     """
-    params = {
-        "engine": "google_reverse_image",
-        "image_url": image_url,
-        "api_key": settings.SERPAPI_KEY,
-    }
-    
-    search = GoogleSearch(params)
-    results = search.get_dict()
-    
-    formatted_results = []
-    
-    raw_results = []
-    if "visual_matches" in results:
-        raw_results = results["visual_matches"]
-    elif "image_results" in results:
-        raw_results = results["image_results"]
-    
-    for match in raw_results:
-        published_date = _extract_published_date(match)
-        published_date_str = _format_date_for_json(published_date)
-        domain = _extract_domain(match)
-        
-        formatted_results.append({
-            "page_url": match.get("link", ""),
-            "image_url": match.get("thumbnail", ""),
-            "title": match.get("title", ""),
-            "domain": domain,
-            "thumbnail": match.get("thumbnail", ""),
-            "publish_date": published_date_str,
-            "engine": "google",
-            "image_metadata": None,
-            "extracted_text": match.get("snippet", "")
-        })
-    
-    return formatted_results
+    api_key = settings.REVERSE_IMAGE_API_KEY
+    if not api_key:
+        logger.error("OpenWebNinja API key not configured (REVERSE_IMAGE)")
+        return []
 
-
-def _perform_yandex_search(image_url):
-    """
-    Perform Yandex reverse image search using SerpAPI.
-    Returns list of results with engine field set to 'yandex'.
-    """
     try:
-        params = {
-            "engine": "yandex_images",
-            "image_url": image_url,
-            "api_key": settings.SERPAPI_KEY
+        headers = {
+            "X-API-Key": api_key
         }
         
-        search = GoogleSearch(params)
-        results = search.get_dict()
+        url = "https://api.openwebninja.com/reverse-image-search/reverse-image-search"
+        params = {"url": image_url}
+        
+        logger.info(f"Calling OpenWebNinja reverse image search for: {image_url}")
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        raw_results = result.get("data", [])
         
         formatted_results = []
-        
-        raw_results = []
-        if "images_results" in results:
-            raw_results = results["images_results"]
-        elif "visual_matches" in results:
-            raw_results = results["visual_matches"]
-        
         for match in raw_results:
-            published_date = _extract_published_date(match)
-            published_date_str = _format_date_for_json(published_date)
-            domain = _extract_domain(match)
+            published_date_str = match.get("date", None)
+            domain = _extract_domain_from_link(match.get("link", ""))
             
             formatted_results.append({
                 "page_url": match.get("link", ""),
-                "image_url": match.get("thumbnail", ""),
+                "image_url": match.get("image", ""),
                 "title": match.get("title", ""),
                 "domain": domain,
-                "thumbnail": match.get("thumbnail", ""),
+                "thumbnail": match.get("image", ""),
                 "publish_date": published_date_str,
-                "engine": "yandex",
+                "engine": "openwebninja",
                 "image_metadata": None,
-                "extracted_text": match.get("snippet", "")
+                "extracted_text": ""
             })
         
         return formatted_results
-    except Exception as e:
-        logger.warning(f"Yandex search failed: {str(e)}")
+        
+    except requests.exceptions.Timeout:
+        logger.error("OpenWebNinja search timed out")
         return []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"OpenWebNinja search failed: {str(e)}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error in OpenWebNinja search: {str(e)}")
+        return []
+
+
+def _extract_domain_from_link(url):
+    """Extract domain from URL."""
+    from urllib.parse import urlparse
+    
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
+    except Exception:
+        return ""
 
 
 def _extract_published_date(match):

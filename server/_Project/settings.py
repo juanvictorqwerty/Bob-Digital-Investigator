@@ -198,6 +198,8 @@ SERPAPI_KEY = env('SERPAPI_KEY', default='')
 OPENROUTER_API_KEY = env('OPENROUTER_API_KEY', default='')
 # RapidAPI Configuration
 RAPIDAPI_KEY = env('RAPIDAPI_KEY', default='')
+# OpenWebNinja (Reverse Image Search) Configuration
+REVERSE_IMAGE_API_KEY = env('REVERSE_IMAGE', default='')
 
 # Celery Configuration
 CELERY_BROKER_URL = "redis://localhost:6379/0"

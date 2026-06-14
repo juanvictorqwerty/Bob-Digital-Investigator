@@ -1,0 +1,14 @@
+# Terminal 1: Redis
+redis-server
+
+# Terminal 2: Celery Worker
+cd server
+celery -A _Project worker -l info
+
+# Terminal 3: Django
+cd server
+python manage.py runserver
+
+# Terminal 4: Next.js
+cd client
+bun run dev

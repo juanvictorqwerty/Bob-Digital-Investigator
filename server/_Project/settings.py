@@ -52,7 +52,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'cloudinary',
     'authentication',
-    'reversewebsearch'
+    'reversewebsearch',
+    'robot',
 ]
 
 MIDDLEWARE = [
@@ -151,7 +152,31 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'authentication.CustomUser'
 
 CORS_ALLOWED_ORIGINS = [
-    env("FRONTEND_URL")
+    env("FRONTEND_URL"),
+    "http://localhost:3000",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    env("FRONTEND_URL"),
+    "http://localhost:3000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization",
+    "content-type",
+    "origin",
+    "x-csrftoken",
+    "x-requested-with",
 ]
 
 STORAGES = {
@@ -169,5 +194,14 @@ CLOUDINARY_API_KEY = env('CLOUDINARY_API_KEY', default='')
 CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
 # SerpApi Configuration
 SERPAPI_KEY = env('SERPAPI_KEY', default='')
+# OpenRouter Configuration
+OPENROUTER_API_KEY = env('OPENROUTER_API_KEY', default='')
 # RapidAPI Configuration
 RAPIDAPI_KEY = env('RAPIDAPI_KEY', default='')
+# OpenWebNinja (Reverse Image Search) Configuration
+REVERSE_IMAGE_API_KEY = env('REVERSE_IMAGE', default='')
+
+# Celery Configuration
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_TASK_TRACK_STARTED = True

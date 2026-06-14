@@ -44,3 +44,51 @@ class ReverseImageSearchSerializer(serializers.ModelSerializer):
                 {"non_field_errors": ["Provide either image_url or image, not both."]}
             )
         return data
+
+
+class WebsearchResultListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing history items - lightweight, no heavy results data.
+    """
+    image_url = serializers.SerializerMethodField()
+    image_thumbnail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WebsearchResults
+        fields = ['id', 'alias', 'query', 'image_url', 'image_thumbnail', 'created_at']
+
+    def get_image_url(self, obj):
+        if obj.image:
+            return obj.image.url
+        return None
+
+    def get_image_thumbnail(self, obj):
+        if obj.image:
+            # Cloudinary can auto-transform for thumbnails
+            return obj.image.build_url(width=80, height=80, crop="fill")
+        return None
+
+
+class WebsearchResultDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for full detail of a search result including all results data.
+    """
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WebsearchResults
+        fields = ['id', 'alias', 'query', 'image_url', 'results', 'created_at', 'updated_at']
+
+    def get_image_url(self, obj):
+        if obj.image:
+            return obj.image.url
+        return None
+
+
+class WebsearchResultAliasSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating only the alias field.
+    """
+    class Meta:
+        model = WebsearchResults
+        fields = ['alias']

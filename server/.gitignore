@@ -7,3 +7,5 @@ authentication/__pycache__
 authentication/migrations/__pycache__
 reversewebsearch/__pycache__
 reversewebsearch/migrations/__pycache__
+robot/__pycache__
+robot/migrations/__pycache__

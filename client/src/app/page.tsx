@@ -211,18 +211,18 @@ export default function Home() {
                   New Search
                 </button>
               </div>
-              <div className="flex-1 overflow-auto px-4">
-                <ResultsView
-                  results={historyResults}
-                  alias={historyAlias}
-                  imageUrl={historyImageUrl}
-                  onBack={() => {
-                    setHistoryResults(null);
-                    setHistoryAlias("");
-                    setHistoryImageUrl("");
-                  }}
-                />
-              </div>
+                  <div className="flex-1 overflow-auto px-4">
+                    <ResultsView
+                      results={historyResults}
+                      alias={historyAlias}
+                      imageUrl={historyImageUrl}
+                      onBack={() => {
+                        setHistoryResults(null);
+                        setHistoryAlias("");
+                        setHistoryImageUrl("");
+                      }}
+                    />
+                  </div>
             </>
           ) : (
             <>

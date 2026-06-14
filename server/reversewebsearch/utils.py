@@ -77,35 +77,6 @@ def fetch_image_metadata(url):
         }
 
 
-def rank_images(results):
-    """
-    Rank images by file size (largest first) or by oldest published_date if size unavailable.
-    Returns sorted list of results.
-    """
-    logger.info(f"Ranking {len(results)} images")
-    
-    def sort_key(result):
-        file_size = result.get("file_size_bytes")
-        published_date = result.get("published_date")
-        
-        # Primary sort: file_size_bytes descending (largest first)
-        if file_size is not None:
-            return (-file_size, datetime.max)  # Use datetime.max as secondary key to prioritize size
-        # Secondary sort: published_date ascending (oldest first)
-        elif published_date:
-            try:
-                return (0, datetime.fromisoformat(published_date))
-            except (ValueError, TypeError):
-                return (0, datetime.max)
-        else:
-            return (0, datetime.max)
-    
-    sorted_results = sorted(results, key=sort_key)
-    
-    logger.info(f"Ranked images - top result: {sorted_results[0].get('url') if sorted_results else 'None'}")
-    return sorted_results
-
-
 def crawl_image(url):
     """
     Crawl an image URL using RapidAPI scraping endpoint with 10-second timeout.

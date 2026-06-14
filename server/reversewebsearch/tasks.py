@@ -2,7 +2,7 @@ from celery import shared_task
 from django.conf import settings
 import requests
 import logging
-from .utils import fetch_image_metadata, rank_images, crawl_image
+from .utils import fetch_image_metadata, crawl_image
 from .models import WebsearchResults
 from .data_processor import process_reverse_search_results
 from robot.analysis_pipeline import run_robot_analysis

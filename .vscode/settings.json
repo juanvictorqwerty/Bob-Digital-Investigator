@@ -9,5 +9,8 @@
             "name": "Database"
         }
     ],
-    "python.defaultInterpreterPath": "/home/linux/miniconda3/envs/Django/bin/python"
+    "python.defaultInterpreterPath": "/home/linux/miniconda3/envs/Django/bin/python",
+    "files.associations": {
+        "plyconfig.json": "jsonc"
+    }
 }

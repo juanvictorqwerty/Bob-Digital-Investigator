@@ -36,7 +36,7 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
     Build a structured prompt for the LLM.
 
     Args:
-        query: User's optional text query
+        query: User's optional text query / the claim to fact-check
         top_candidates: List of ranked result dicts with scores, domains, dates, crawl_data
         timeline: List of timeline entries [{date, domain, url}]
         statistics: Dict with total_sources, trusted_domains, etc.
@@ -45,7 +45,7 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
     Returns:
         String prompt
     """
-    # Build candidates section (top 10)
+    # Build candidates section (top 10) — include FULL crawl snippet
     candidates_lines = []
     for i, c in enumerate(top_candidates[:10], 1):
         publish_date = c.get("publish_date", "N/A") or "N/A"
@@ -54,19 +54,19 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
         title = c.get("title", "No title")
         engine = c.get("engine", "unknown")
 
-        # Crawl snippet (first 200 chars)
+        # Crawl snippet (full — up to 1000 chars)
         crawl_data = c.get("crawl_data", {}) or {}
         snippet = ""
         if crawl_data.get("crawl_status") == "success":
             raw = crawl_data.get("raw_snippet", "")
             if raw:
-                snippet = raw[:200]
+                snippet = raw[:1000]
 
         candidates_lines.append(
             f"  [{i}] Score: {score} | Domain: {domain} | Engine: {engine}\n"
             f"      Title: {title}\n"
             f"      Published: {publish_date}\n"
-            f"      Crawl snippet: {snippet}\n"
+            f"      Crawled page content:\n{snippet}\n"
         )
 
     candidates_text = "\n".join(candidates_lines)
@@ -85,12 +85,19 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
         rules_lines.append(f"  - {key}: {val}")
     rules_text = "\n".join(rules_lines)
 
-    prompt = f"""You are a digital forensics and misinformation analysis expert. Your job is to analyze reverse image search results and determine if the content is likely real news, fake news (misinformation/disinformation), suspicious, or unconfirmable.
+    # Detect and highlight crawl data anomalies
+    crawl_anomalies = _detect_crawl_anomalies(top_candidates)
+    crawl_text = "\n".join(crawl_anomalies) if crawl_anomalies else "  None detected."
 
-## User's Query / Question
-{query or "(No additional query provided by the user)"}
+    prompt = f"""You are a digital forensics and misinformation analysis expert. Your job is to analyze reverse image search results to verify or debunk a specific claim made by the user.
+
+## THE USER'S CLAIM TO FACT-CHECK
+{query or "(No additional claim provided by the user)"}
+
+**Focus your analysis on this specific claim.** Determine if the search results confirm the claim, contradict it, or are inconclusive.
 
 ## Ranked Search Results (top 10 by relevance score)
+Each result includes crawled page content from the source.
 {candidates_text}
 
 ## Publication Timeline
@@ -103,15 +110,19 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
 - Sources from trusted domains: {statistics.get('trusted_domains', 'N/A')}
 - Unique domains: {statistics.get('unique_domains', 'N/A')}
 
+## Crawl Data Anomalies
+{crawl_text}
+
 ## Rules-based Preliminary Assessment
 {rules_text}
 
 ## Analysis Instructions
-1. **Check date consistency** — Are all sources from the same narrow timeframe (suggesting a coordinated push)? Or is there a natural chronological spread?
-2. **Evaluate source credibility** — Are the top sources from known reputable/trusted domains? Or from obscure/untrustworthy domains?
-3. **Look for corroboration** — Do Google and Yandex results agree? Do multiple independent sources carry the same story?
-4. **Examine crawl data** — Do the crawled snippets contain sensational language, contradictory claims, or lack of factual reporting?
-5. **Consider the user's query** — Does the user's question indicate they suspect something specific?
+1. **Evaluate the user's claim** — Does the crawled page content support or contradict what the user suspects? Does the claim appear in multiple independent sources?
+2. **Check date consistency** — Are all sources from the same narrow timeframe (suggesting a coordinated push)? Or is there a natural chronological spread?
+3. **Evaluate source credibility** — Are the top sources from known reputable/trusted domains? Or from obscure/untrustworthy domains?
+4. **Look for corroboration** — Do results from different sources carry consistent information?
+5. **Examine crawl data** — Do the crawled snippets contain sensational language, contradictory claims, lack of factual reporting, or AI-generated text?
+6. **Cross-check the image** — Does the image appear in contexts that match its original purpose, or is it being used misleadingly?
 
 ## Output Format
 Respond with **valid JSON only** — no markdown fences, no extra text.
@@ -120,23 +131,79 @@ Respond with **valid JSON only** — no markdown fences, no extra text.
   "verdict": "real|fake|suspicious|unconfirmed",
   "confidence": <0.0 to 1.0>,
   "short_summary": "<One short sentence explaining the verdict>",
-  "explanation": "<Detailed 3-6 sentence explanation of your reasoning>",
+  "explanation": "<Detailed 3-6 sentence explanation of your reasoning, referencing the user's claim and the crawled content>",
   "key_evidence": [
-    "<Specific evidence item 1>",
-    "<Specific evidence item 2>",
-    "<Specific evidence item 3>"
+    "<Specific evidence item 1 from crawled content>",
+    "<Specific evidence item 2 from crawled content>",
+    "<Specific evidence item 3 from crawled content>"
   ]
 }}
 
 **Verdict meanings:**
-- "real" — Strong evidence the content is authentic/genuine news
-- "fake" — Strong evidence of misinformation, manipulation, or false claims
+- "real" — Strong evidence the content is authentic/genuine news; the user's claim is supported
+- "fake" — Strong evidence of misinformation, manipulation, or false claims; the user's claim is contradicted
 - "suspicious" — Some red flags but not conclusive
 - "unconfirmed" — Insufficient data to make a determination
 
 Now analyze the data and return your verdict.
 """
     return prompt
+
+
+def _detect_crawl_anomalies(top_candidates):
+    """
+    Detect suspicious patterns in crawled page content.
+
+    Args:
+        top_candidates: List of result dicts with crawl_data
+
+    Returns:
+        List of anomaly description strings
+    """
+    anomalies = []
+
+    for c in top_candidates[:5]:
+        crawl_data = c.get("crawl_data", {}) or {}
+        if crawl_data.get("crawl_status") != "success":
+            continue
+
+        snippet = crawl_data.get("raw_snippet", "") or ""
+
+        if not snippet or len(snippet.strip()) < 50:
+            anomalies.append(
+                f"  - {c.get('domain', '?')}: Crawled page has very little content "
+                f"({len(snippet.strip())} chars) — may be a low-quality or auto-generated page."
+            )
+            continue
+
+        # Check for AI-generated text markers
+        ai_markers = ["as an ai", "as a language model", "i cannot", "i don't have"]
+        snippet_lower = snippet.lower()
+        for marker in ai_markers:
+            if marker in snippet_lower:
+                anomalies.append(
+                    f"  - {c.get('domain', '?')}: Page content contains AI disclaimer ('{marker}') "
+                    f"— possible AI-generated or placeholder content."
+                )
+                break
+
+        # Check for sensational language
+        sensational = ["breaking!", "shocking!", "you won't believe", "viral", "must see", "urgent"]
+        sensational_found = [w for w in sensational if w in snippet_lower]
+        if sensational_found:
+            anomalies.append(
+                f"  - {c.get('domain', '?')}: Sensational language detected: {sensational_found}"
+            )
+
+        # Check for extremely short pages (thin content)
+        word_count = len(snippet.split())
+        if word_count < 30:
+            anomalies.append(
+                f"  - {c.get('domain', '?')}: Very thin page content ({word_count} words) "
+                f"— may be a spam or placeholder page."
+            )
+
+    return anomalies
 
 
 def analyze_with_openrouter(prompt, model=None):

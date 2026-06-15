@@ -184,63 +184,80 @@ export default function ReverseSearchResult() {
   const crawledCount = items.filter((r) => r.crawl_data && r.crawl_data.crawl_status === "success").length;
 
   return (
-    <main className="h-screen bg-linear-to-br from-gray-50 to-gray-100 grid grid-cols-4">
+    <main className="h-screen bg-linear-to-br from-gray-50 to-gray-100 flex flex-col">
 
-      <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400">
-                  <HistoryBlock/>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-4 py-8 col-span-3 overflow-y-auto">
-        
-        {/* Header with uploaded image preview */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-4">
-              {/* Cached Image Display */}
-              {cachedImage && (
-                <div className="relative">
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 ring-2 ring-blue-500 ring-offset-2">
-                    <img
-                      src={cachedImage}
-                      alt="Uploaded"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full border-2 border-white"></div>
+      {/* ── Fixed Header Bar ── */}
+      <header className="sticky top-0 z-30 shrink-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between px-6 py-3">
+          <div className="flex items-center gap-4">
+            {/* Cached Image Display */}
+            {cachedImage && (
+              <div className="relative">
+                <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 ring-2 ring-blue-500 ring-offset-2">
+                  <img
+                    src={cachedImage}
+                    alt="Uploaded"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
-              )}
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 bg-linear-to-r from-gray-900 to-gray-600 bg-clip-text">
-                  Reverse Image Search
-                </h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  Found {stats.total_sources} results across Google · Sorted by relevance
-                </p>
+                <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
               </div>
+            )}
+            <div>
+              <h1 className="text-xl font-bold text-gray-900 bg-linear-to-r from-gray-900 to-gray-600 bg-clip-text">
+                Reverse Image Search
+              </h1>
+              <p className="text-xs text-gray-500">
+                Found {stats.total_sources} results across Google · Sorted by relevance
+              </p>
             </div>
-            <button
-              onClick={() => router.push("/")}
-              className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
-            >
-              New Search
-            </button>
+          </div>
+          <button
+            onClick={() => router.push("/")}
+            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+          >
+            New Search
+          </button>
+        </div>
+      </header>
+
+      {/* ── Scrollable Content Area with Sidebar ── */}
+      <div className="flex-1 flex min-h-0 overflow-hidden relative z-20">
+
+        {/* Left Sidebar */}
+        <div className="bg-blue-50 w-[260px] flex-shrink-0 border-r-2 border-gray-400 flex flex-col h-full">
+          <div className="flex-1 overflow-y-auto p-4">
+            <HistoryBlock />
           </div>
         </div>
 
-        {/* Stats Cards - Modern Design */}
-        <StatCards stats={stats} />
+        {/* Main Results (scrolls behind footer) */}
+        <div className="flex-1 overflow-y-auto pb-64 relative">
+          <div className="max-w-5xl mx-auto px-6 pt-6">
+            {/* Stats Cards */}
+            <StatCards stats={stats} />
 
-        {/* Timeline Section */}
-        <TimelineSection timeline={timeline} />
+            {/* Timeline Section */}
+            <TimelineSection timeline={timeline} />
 
-        {/* Results list - Modern Cards */}
-        <ResultCard sorted={sorted} oldestDatedIndex={oldestDatedIndex} />
-        
-        {/* Image Gallery Section - Modern Grid */}
-        <ImageGallery withImages={withImages} />
+            {/* Results list */}
+            <ResultCard sorted={sorted} oldestDatedIndex={oldestDatedIndex} />
+            
+            {/* Image Gallery */}
+            <ImageGallery withImages={withImages} />
+          </div>
 
-        <RobotResponse robot={robot} />
+          {/* ── Spacer so last content clears the fixed footer ── */}
+          <div className="h-8" />
+        </div>
       </div>
+
+      {/* ── Fixed AI Response Footer (overlays bottom of scrollable content) ── */}
+      {robot && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-sm border-t-2 border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+          <RobotResponse robot={robot} compact={true} />
+        </div>
+      )}
     </main>
   );
 }

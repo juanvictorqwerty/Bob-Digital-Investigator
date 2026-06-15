@@ -20,6 +20,7 @@ _CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'trusted_domains.json')
 _trusted_data: dict = {}
 _trusted_domains: set[str] = set()
 _certified_facebook_pages: set[str] = set()
+_trusted_suffixes: set[str] = set()
 
 
 def _load_config() -> dict:
@@ -27,7 +28,7 @@ def _load_config() -> dict:
     Load the trusted domains JSON file.
     
     Returns:
-        Dict with 'domains' and 'certified_facebook_pages' keys.
+        Dict with 'domains', 'certified_facebook_pages', and 'trusted_suffixes' keys.
         Returns empty dict on failure.
     """
     try:
@@ -48,15 +49,20 @@ def reload_config() -> None:
     
     Call this if the JSON file is updated at runtime.
     """
-    global _trusted_data, _trusted_domains, _certified_facebook_pages
+    global _trusted_data, _trusted_domains, _certified_facebook_pages, _trusted_suffixes
     
     _trusted_data = _load_config()
     _trusted_domains = set(_trusted_data.get('domains', []))
     _certified_facebook_pages = set(_trusted_data.get('certified_facebook_pages', []))
+    _trusted_suffixes = set()
+    for suffix in _trusted_data.get('trusted_suffixes', []):
+        # Normalize: strip leading dot for consistency
+        _trusted_suffixes.add(suffix.lower().lstrip('.'))
     
     logger.info(
-        f"Loaded {len(_trusted_domains)} trusted domains "
-        f"and {len(_certified_facebook_pages)} certified Facebook pages"
+        f"Loaded {len(_trusted_domains)} trusted domains, "
+        f"{len(_certified_facebook_pages)} certified Facebook pages, "
+        f"{len(_trusted_suffixes)} trusted suffixes"
     )
 
 
@@ -72,6 +78,34 @@ def get_trusted_domains() -> set[str]:
 def get_certified_facebook_pages() -> set[str]:
     """Return the current set of certified Facebook page usernames."""
     return _certified_facebook_pages
+
+
+def get_trusted_suffixes() -> set[str]:
+    """Return the current set of trusted suffixes (e.g., 'org', 'gov', 'edu')."""
+    return _trusted_suffixes
+
+
+def has_trusted_suffix(domain: Optional[str]) -> bool:
+    """
+    Check if a domain contains a trusted suffix anywhere in its parts.
+    
+    A domain like 'example.org.cm' or 'university.edu.ru' will match if
+    'org' or 'edu' is in the trusted_suffixes list.
+    
+    Args:
+        domain: Domain string (e.g., 'bbc.org.cm', 'univ.edu.ru', 'reuters.com')
+    
+    Returns:
+        True if any part of the domain matches a trusted suffix
+    """
+    if not domain:
+        return False
+    
+    parts = domain.lower().split('.')
+    for part in parts:
+        if part in _trusted_suffixes:
+            return True
+    return False
 
 
 def is_trusted_domain(domain: Optional[str]) -> bool:

@@ -7,6 +7,7 @@ import logging
 from reversewebsearch.trusted_domains_loader import (
     is_trusted_domain,
     is_certified_facebook_page,
+    has_trusted_suffix,
 )
 
 
@@ -350,7 +351,9 @@ def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int
         +2   has publish_date in metadata
         +2   has image_metadata
         +1   image is ≥ 800×600  (lowered from 1000×1000 for mobile-first content)
-        +1   trusted domain (no-op when TRUSTED_DOMAINS is empty)
+        +2   trusted domain (loaded from trusted_domains.json)
+        +1   trusted suffix in domain (e.g. .org, .gov, .edu in .org.cm, .gov.ru)
+        +2   certified Facebook page (stacked on top of domain trust)
 
     Tier 4 — graduated penalties (not a single binary gate)
         -3   junk URL pattern (thumbnails, cache, proxy, resize)
@@ -358,7 +361,7 @@ def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int
         -6   sublink / non-canonical URL
         -2   no signal at all (floor nudge)
 
-    Max possible score  : 14 pts
+    Max possible score  : 18 pts
     Without trust/meta  : 4–9 pts  (still useful for ranking)
     """
     score = 0
@@ -414,11 +417,15 @@ def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int
 
     # Trust bonus for known reputable domains (loaded from trusted_domains.json)
     if is_trusted_domain(domain):
+        score += 2
+
+    # Bonus for trusted suffixes in the domain (e.g. .org, .gov, .edu in .org.cm)
+    if has_trusted_suffix(domain):
         score += 1
 
     # Additional bonus for certified Facebook pages (stacked on top of domain trust)
     if is_certified_facebook_page(page_url):
-        score += 1
+        score += 2
 
     # ── Tier 4: Graduated penalties ──────────────────────────────────────────
     # Split miniature vs sublink so you can tune them independently in the future.

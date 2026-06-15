@@ -1,0 +1,12 @@
+{
+  "domains": [
+    "reuters.com", "apnews.com", "bbc.com", "nytimes.com", "washingtonpost.com",
+    "theguardian.com", "wsj.com", "bloomberg.com", "cnn.com", "nbcnews.com",
+    "abcnews.go.com", "cbsnews.com", "time.com", "theatlantic.com", "politico.com",
+    "npr.org", "pbs.org", "ft.com", "economist.com", "nature.com", "science.org",
+    "gov.uk", "gov.au", "canada.ca", "europa.eu", "un.org", "who.int",
+    "whitehouse.gov", "state.gov", "justice.gov", "fbi.gov", "nih.gov",
+    "facebook.com", "fb.com"
+  ],
+  "certified_facebook_pages": []
+}

@@ -4,19 +4,13 @@ from collections import defaultdict
 import re
 import logging
 
+from reversewebsearch.trusted_domains_loader import (
+    is_trusted_domain,
+    is_certified_facebook_page,
+)
+
 
 logger = logging.getLogger(__name__)
-
-
-# List of trusted domains (can be expanded)
-TRUSTED_DOMAINS = {
-    'reuters.com', 'apnews.com', 'bbc.com', 'nytimes.com', 'washingtonpost.com',
-    'theguardian.com', 'wsj.com', 'bloomberg.com', 'cnn.com', 'nbcnews.com',
-    'abcnews.go.com', 'cbsnews.com', 'time.com', 'theatlantic.com', 'politico.com',
-    'npr.org', 'pbs.org', 'ft.com', 'economist.com', 'nature.com', 'science.org',
-    'gov.uk', 'gov.au', 'canada.ca', 'europa.eu', 'un.org', 'who.int',
-    'whitehouse.gov', 'state.gov', 'justice.gov', 'fbi.gov', 'nih.gov'
-}
 
 
 def normalize_url(url):
@@ -335,10 +329,6 @@ _CLEAN_IMAGE_URL_RE = re.compile(r'\.(jpg|jpeg|png|webp)(\?.*)?$', re.IGNORECASE
 # ── Date-in-URL (your version, slightly widened) ──────────────────────────────
 _DATE_IN_URL_RE = re.compile(r'/20[1-3][0-9]/')  # covers 2010–2039
 
-# Optional — populate if you have a list; empty = no effect on score
-TRUSTED_DOMAINS: set[str] = set()
-
-
 def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int:
     """
     Merged ranking algorithm optimised for Cameroon / low-metadata environments.
@@ -422,8 +412,12 @@ def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int
         if width and height and int(width) >= 800 and int(height) >= 600:
             score += 1
 
-    # Trust bonus is optional — when TRUSTED_DOMAINS is empty this is a no-op.
-    if TRUSTED_DOMAINS and is_trusted_domain(domain):
+    # Trust bonus for known reputable domains (loaded from trusted_domains.json)
+    if is_trusted_domain(domain):
+        score += 1
+
+    # Additional bonus for certified Facebook pages (stacked on top of domain trust)
+    if is_certified_facebook_page(page_url):
         score += 1
 
     # ── Tier 4: Graduated penalties ──────────────────────────────────────────
@@ -443,7 +437,7 @@ def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int
         or metadata
         or is_cm_domain
         or has_local_keyword
-        or (TRUSTED_DOMAINS and is_trusted_domain(domain))
+        or is_trusted_domain(domain)
     )
     if not has_any_signal:
         score -= 2
@@ -549,33 +543,9 @@ def build_timeline(results):
     return timeline_entries
 
 
-def is_trusted_domain(domain):
-    """
-    Check if a domain is in the trusted list.
-    
-    Args:
-        domain: Domain string
-    
-    Returns:
-        Boolean
-    """
-    if not domain:
-        return False
-    
-    domain = domain.lower()
-    
-    # Direct match
-    if domain in TRUSTED_DOMAINS:
-        return True
-    
-    # Subdomain match (e.g., sub.bbc.com → bbc.com)
-    parts = domain.split('.')
-    for i in range(len(parts) - 1):
-        subdomain = '.'.join(parts[i:])
-        if subdomain in TRUSTED_DOMAINS:
-            return True
-    
-    return False
+# is_trusted_domain is imported from trusted_domains_loader
+# It checks against the JSON config file (trusted_domains.json)
+# See: trusted_domains_loader.is_trusted_domain()
 
 
 def compute_statistics(results):
@@ -601,12 +571,16 @@ def compute_statistics(results):
             if is_trusted_domain(domain):
                 trusted_domain_count += 1
     
+    # Count certified Facebook pages
+    certified_fb_count = sum(1 for r in results if is_certified_facebook_page(r.get('page_url')))
+    
     return {
         'total_sources': total_sources,
         'with_publish_date': with_publish_date,
         'with_image_metadata': with_image_metadata,
         'unique_domains': len(unique_domains),
-        'trusted_domains': trusted_domain_count
+        'trusted_domains': trusted_domain_count,
+        'certified_facebook_pages': certified_fb_count
     }
 
 

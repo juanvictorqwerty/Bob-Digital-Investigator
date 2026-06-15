@@ -132,9 +132,13 @@ def fetch_image_metadata(url):
         }
 
 
-def crawl_image(url):
+def crawl_image(url, attempt=1, max_retries=2):
     """
     Crawl the actual page URL to extract metadata and readable content.
+
+    Retries up to `max_retries` times on transient failures (timeout,
+    connection error, server 5xx). Does NOT retry on paywalls, 403s,
+    404s, rate limits, or insufficient content.
 
     Replaces the previous RapidAPI-based approach with direct HTTP fetching
     using BeautifulSoup for content extraction. This allows us to:
@@ -146,6 +150,8 @@ def crawl_image(url):
 
     Args:
         url: The page URL to crawl
+        attempt: Current attempt number (1-based, internal)
+        max_retries: Max attempts before giving up (default 2)
 
     Returns:
         Dict with:
@@ -158,8 +164,9 @@ def crawl_image(url):
             author: Extracted author name or None
             domain: Domain extracted from the URL
             paywall_detected: True/False whether a paywall was detected
+            attempts: Number of attempts made
     """
-    logger.info(f"Crawling page URL: {url}")
+    logger.info(f"Crawling page URL: {url} (attempt {attempt}/{max_retries})")
 
     if not url:
         logger.warning("No URL provided for crawling")
@@ -182,35 +189,47 @@ def crawl_image(url):
         # Handle HTTP errors
         if response.status_code >= 400:
             error_msg = f"HTTP {response.status_code}"
+            can_retry = False
+
             if response.status_code == 403:
                 error_msg = "Blocked (HTTP 403)"
             elif response.status_code == 404:
                 error_msg = "Page not found (HTTP 404)"
             elif response.status_code == 429:
                 error_msg = "Rate limited (HTTP 429)"
+                # Rate limit — wait 1s and retry if attempts left
+                if attempt < max_retries:
+                    import time as _time
+                    _time.sleep(1)
+                    result = crawl_image(url, attempt=attempt + 1, max_retries=max_retries)
+                    result["attempts"] = attempt
+                    return result
+                error_msg = "Rate limited (HTTP 429) — exhausted retries"
             elif response.status_code >= 500:
-                error_msg = f"Server error (HTTP {response.status_code})"
+                # Server error — wait 1s and retry if attempts left
+                if attempt < max_retries:
+                    import time as _time
+                    _time.sleep(1)
+                    result = crawl_image(url, attempt=attempt + 1, max_retries=max_retries)
+                    result["attempts"] = attempt
+                    return result
+                error_msg = f"Server error (HTTP {response.status_code}) — exhausted retries"
 
             logger.warning(f"Crawl failed for {url}: {error_msg}")
-            return _failed_crawl(error_msg, domain)
+            return {**_failed_crawl(error_msg, domain), "attempts": attempt}
 
         # Check content type — skip non-HTML responses
         content_type = response.headers.get("Content-Type", "")
         if "text/html" not in content_type and "application/xhtml" not in content_type:
             logger.warning(f"Non-HTML response for {url}: {content_type}")
-            return _failed_crawl(f"Non-HTML content: {content_type}", domain)
+            return {**_failed_crawl(f"Non-HTML content: {content_type}", domain), "attempts": attempt}
 
         # Parse HTML
         soup = BeautifulSoup(response.text, "html.parser")
 
         # ── Extract metadata ────────────────────────────────────────────────
-        # Title
         page_title = _extract_title(soup)
-
-        # Publish date (meta tags first, then <time> elements)
         publish_date = _extract_publish_date(soup)
-
-        # Author
         author = _extract_author(soup)
 
         # ── Check for paywall / access blocks ──────────────────────────────
@@ -231,10 +250,11 @@ def crawl_image(url):
                 "author": author,
                 "domain": domain,
                 "paywall_detected": paywall_detected,
+                "attempts": attempt,
             }
 
         logger.info(
-            f"Successfully crawled {url}: "
+            f"Successfully crawled {url} (attempt {attempt}/{max_retries}): "
             f"title='{page_title[:60] if page_title else 'N/A'}', "
             f"date={publish_date or 'N/A'}, "
             f"author={author or 'N/A'}, "
@@ -252,20 +272,33 @@ def crawl_image(url):
             "author": author,
             "domain": domain,
             "paywall_detected": paywall_detected,
+            "attempts": attempt,
         }
 
     except requests.exceptions.Timeout:
-        logger.warning(f"Timeout crawling {url}")
-        return _failed_crawl("Crawl timeout", domain)
+        logger.warning(f"Timeout crawling {url} (attempt {attempt}/{max_retries})")
+        if attempt < max_retries:
+            import time as _time
+            _time.sleep(1)
+            result = crawl_image(url, attempt=attempt + 1, max_retries=max_retries)
+            result["attempts"] = attempt
+            return result
+        return {**_failed_crawl("Crawl timeout — exhausted retries", domain), "attempts": attempt}
     except requests.exceptions.ConnectionError as e:
-        logger.warning(f"Connection error crawling {url}: {str(e)[:100]}")
-        return _failed_crawl(f"Connection error: {str(e)[:80]}", domain)
+        logger.warning(f"Connection error crawling {url} (attempt {attempt}/{max_retries}): {str(e)[:80]}")
+        if attempt < max_retries:
+            import time as _time
+            _time.sleep(1)
+            result = crawl_image(url, attempt=attempt + 1, max_retries=max_retries)
+            result["attempts"] = attempt
+            return result
+        return {**_failed_crawl(f"Connection error — exhausted retries", domain), "attempts": attempt}
     except requests.exceptions.RequestException as e:
         logger.warning(f"Request error crawling {url}: {str(e)[:100]}")
-        return _failed_crawl(f"Request error: {str(e)[:80]}", domain)
+        return {**_failed_crawl(f"Request error: {str(e)[:80]}", domain), "attempts": attempt}
     except Exception as e:
         logger.error(f"Unexpected error crawling {url}: {str(e)[:200]}")
-        return _failed_crawl(f"Unexpected error: {str(e)[:80]}", domain)
+        return {**_failed_crawl(f"Unexpected error: {str(e)[:80]}", domain), "attempts": attempt}
 
 
 def _failed_crawl(error_message, domain=None):

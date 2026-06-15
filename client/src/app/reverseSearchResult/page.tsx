@@ -81,6 +81,9 @@ export default function ReverseSearchResult() {
   const [results, setResults] = useState<Results | null>(null);
   const [loading, setLoading] = useState(true);
   const [cachedImage, setCachedImage] = useState<string | null>(null);
+  const [sseLog, setSseLog] = useState<Array<{event: string; data: any; timestamp: string}>>([]);
+  const [progress, setProgress] = useState("");
+  const [progressStep, setProgressStep] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -93,16 +96,51 @@ export default function ReverseSearchResult() {
       if (parsedResults.uploaded_image) {
         setCachedImage(parsedResults.uploaded_image);
       }
+
+      // If results already have robot_analysis and timeline, skip loading
+      if (parsedResults.robot_analysis || parsedResults.timeline?.length > 0) {
+        setLoading(false);
+        return;
+      }
+    }
+    
+    // Load SSE log from sessionStorage (captured during upload)
+    const storedSseLog = sessionStorage.getItem("sseLog");
+    if (storedSseLog) {
+      try {
+        const parsed = JSON.parse(storedSseLog);
+        setSseLog(parsed);
+        // Derive progress from last SSE event
+        if (parsed.length > 0) {
+          const last = parsed[parsed.length - 1];
+          if (last.data?.message) setProgress(last.data.message);
+          if (last.data?.step) setProgressStep(last.data.step);
+          if (last.event === "done") {
+            // Already done, show results immediately
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
     }
     
     // Simulate minimum loading time for better UX
     setTimeout(() => {
       setLoading(false);
-    }, 1500);
+    }, 2000);
   }, []);
 
   if (loading) {
-    return <LoadingScreen />;
+    return (
+      <LoadingScreen
+        sseLog={sseLog.map(e => ({ ...e, timestamp: new Date(e.timestamp) }))}
+        progress={progress}
+        progressStep={progressStep}
+        finished={!!(results?.robot_analysis || results?.timeline?.length)}
+      />
+    );
   }
 
   if (!results) {

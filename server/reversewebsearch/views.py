@@ -1,7 +1,8 @@
 # reversewebsearch/views.py
 from django.conf import settings
+from django.core.cache import cache
 from django.http import JsonResponse, StreamingHttpResponse
-from django.views import View  # Add this
+from django.views import View
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.generics import GenericAPIView
@@ -28,10 +29,38 @@ from celery.result import AsyncResult
 logger = logging.getLogger(__name__)
 
 
+def _resolve_user_from_token(request):
+    """
+    Resolve the authenticated user from a token in the request header.
+    Uses select_related to avoid N+1 queries on Token->User.
+    Returns (user, error_response) tuple.
+    If error_response is None, user is valid.
+    """
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Token '):
+        return None, JsonResponse(
+            {"error": "Authentication required"},
+            status=401
+        )
+    
+    token = auth_header.replace('Token ', '').strip()
+    from rest_framework.authtoken.models import Token
+    try:
+        # select_related('user') eliminates the extra query to fetch the User row
+        token_obj = Token.objects.select_related('user').get(key=token)
+    except Token.DoesNotExist:
+        return None, JsonResponse(
+            {"error": "Invalid token"},
+            status=401
+        )
+    
+    return token_obj.user, None
+
+
 class ReverseImageSearchView(GenericAPIView):
     parser_classes = (MultiPartParser, FormParser)
     serializer_class = ReverseImageSearchSerializer
-    authentication_classes=[TokenAuthentication]
+    authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
@@ -56,6 +85,7 @@ class ReverseImageSearchView(GenericAPIView):
 
         cloudinary_public_id = None
         if uploaded_image and not image_url:
+            # We upload inline, but this could be moved to the Celery task
             image_url, cloudinary_public_id = self._upload_to_cloudinary(uploaded_image)
 
         try:
@@ -102,17 +132,6 @@ class ReverseImageSearchView(GenericAPIView):
         return result["secure_url"], result["public_id"]
 
 
-    def _save_results(self, user, uploaded_image, cloudinary_public_id, image_url, query, results):
-        image_value = cloudinary_public_id if cloudinary_public_id else uploaded_image
-        
-        WebsearchResults.objects.create(
-            user=user,
-            image=image_value,
-            query=query or image_url,
-            results=results
-        )
-
-
 # FIXED: Use Django's plain View instead of GenericAPIView to bypass DRF content negotiation
 class ReverseSearchProgressView(View):
     """
@@ -122,69 +141,75 @@ class ReverseSearchProgressView(View):
     """
     
     def get(self, request, task_id):
-        # Manual authentication check since we're not using DRF's permission system
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Token '):
-            return JsonResponse(
-                {"error": "Authentication required"}, 
-                status=401
-            )
-        
-        token = auth_header.replace('Token ', '').strip()
-        
-        # Verify token manually
-        from rest_framework.authtoken.models import Token
-        try:
-            Token.objects.get(key=token)
-        except Token.DoesNotExist:
-            return JsonResponse(
-                {"error": "Invalid token"}, 
-                status=401
-            )
+        user, error = _resolve_user_from_token(request)
+        if error:
+            return error
 
         def event_stream():
+            # Exponential backoff: start at 0.5s, cap at 4s
+            delay = 0.5
+            max_delay = 4.0
+            backoff_factor = 1.5
+
             while True:
                 result = AsyncResult(task_id)
+                state = result.state
 
-                if result.state == "PENDING":
+                if state == "PENDING":
                     yield _sse("queued", {"message": "Waiting for worker…"})
 
-                elif result.state == "PROGRESS":
+                elif state == "PROGRESS":
                     yield _sse("progress", result.info)
 
-                elif result.state == "SUCCESS":
+                elif state == "SUCCESS":
                     yield _sse("done", result.result)
                     break
 
-                elif result.state == "FAILURE":
+                elif state == "FAILURE":
                     yield _sse("error", {"error": str(result.info)})
                     break
 
-                time.sleep(1)
+                # Exponential backoff sleep
+                time.sleep(delay)
+                delay = min(delay * backoff_factor, max_delay)
 
         return StreamingHttpResponse(
             event_stream(),
             content_type="text/event-stream"
         )
 
+
 class HistoryListView(View):
     """
     List all reverse search history items (lightweight) for the authenticated user.
+    Results are paginated with ?page=1&page_size=20 query params.
     """
-    def get(self, request):
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Token '):
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        
-        token = auth_header.replace('Token ', '').strip()
-        from rest_framework.authtoken.models import Token
-        try:
-            token_obj = Token.objects.get(key=token)
-        except Token.DoesNotExist:
-            return JsonResponse({"error": "Invalid token"}, status=401)
+    DEFAULT_PAGE_SIZE = 20
+    MAX_PAGE_SIZE = 100
 
-        user = token_obj.user
-        queryset = WebsearchResults.objects.filter(user=user)
+    def get(self, request):
+        user, error = _resolve_user_from_token(request)
+        if error:
+            return error
+
+        # Parse pagination params
+        try:
+            page = max(1, int(request.GET.get('page', 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            page_size = min(
+                self.MAX_PAGE_SIZE,
+                max(1, int(request.GET.get('page_size', self.DEFAULT_PAGE_SIZE)))
+            )
+        except (ValueError, TypeError):
+            page_size = self.DEFAULT_PAGE_SIZE
+
+        offset = (page - 1) * page_size
+
+        queryset = WebsearchResults.objects.filter(user=user).only(
+            'id', 'alias', 'query', 'created_at'
+        )[offset:offset + page_size]
         serializer = WebsearchResultListSerializer(queryset, many=True)
         return JsonResponse(serializer.data, safe=False)
 
@@ -194,18 +219,10 @@ class HistoryDetailView(View):
     Retrieve full details of a single search result by its UUID.
     """
     def get(self, request, pk):
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Token '):
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        
-        token = auth_header.replace('Token ', '').strip()
-        from rest_framework.authtoken.models import Token
-        try:
-            token_obj = Token.objects.get(key=token)
-        except Token.DoesNotExist:
-            return JsonResponse({"error": "Invalid token"}, status=401)
+        user, error = _resolve_user_from_token(request)
+        if error:
+            return error
 
-        user = token_obj.user
         try:
             obj = WebsearchResults.objects.get(pk=pk, user=user)
         except WebsearchResults.DoesNotExist:
@@ -230,18 +247,10 @@ class HistoryAliasUpdateView(View):
         return response
 
     def patch(self, request, pk):
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Token '):
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        
-        token = auth_header.replace('Token ', '').strip()
-        from rest_framework.authtoken.models import Token
-        try:
-            token_obj = Token.objects.get(key=token)
-        except Token.DoesNotExist:
-            return JsonResponse({"error": "Invalid token"}, status=401)
+        user, error = _resolve_user_from_token(request)
+        if error:
+            return error
 
-        user = token_obj.user
         try:
             obj = WebsearchResults.objects.get(pk=pk, user=user)
         except WebsearchResults.DoesNotExist:
@@ -259,5 +268,6 @@ class HistoryAliasUpdateView(View):
             return JsonResponse(serializer.data)
         return JsonResponse(serializer.errors, status=400)
 
+
 def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n" 
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"

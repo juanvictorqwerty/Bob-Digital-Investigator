@@ -65,6 +65,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django.middleware.gzip.GZipMiddleware',
 ]
 
 ROOT_URLCONF = '_Project.urls'
@@ -205,3 +206,22 @@ REVERSE_IMAGE_API_KEY = env('REVERSE_IMAGE', default='')
 CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 CELERY_TASK_TRACK_STARTED = True
+
+# Redis Cache Configuration
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://localhost:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+        },
+        "KEY_PREFIX": "bob",
+        "TIMEOUT": 3600,  # 1 hour default
+    }
+}
+
+# Cache timeout for external API responses (seconds)
+CACHE_EXTERNAL_API_TTL = 86400  # 24 hours for external search results
+CACHE_CRAWL_TTL = 604800        # 7 days for crawled pages (slow to fetch)
+CACHE_METADATA_TTL = 86400      # 24 hours for image metadata

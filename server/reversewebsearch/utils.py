@@ -1,9 +1,11 @@
 import logging
+import re
 import requests
 from datetime import datetime
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from django.conf import settings
+from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +64,72 @@ _PAYWALL_SELECTORS = [
     "[data-testid='paywall']",
 ]
 
+# Pre-compiled regex patterns for performance
+_RE_WHITESPACE = re.compile(r'\s+')
+_RE_SENSATIONAL = re.compile(r'(breaking!|shocking!|you won\'t believe|viral|must see|urgent)', re.IGNORECASE)
+_RE_AI_MARKERS = re.compile(r'(as an ai|as a language model|i cannot|i don\'t have)', re.IGNORECASE)
+
+# Shared requests Session with connection pooling
+_http_session = None
+
+def _get_http_session():
+    """Get or create a shared requests Session with connection pooling.
+    
+    Reuses TCP connections across requests, which is significantly faster
+    than creating a new connection for every request.
+    """
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+        _http_session.headers.update({"User-Agent": _USER_AGENT})
+        # Connection pool size: up to 20 concurrent connections
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=20,
+            max_retries=0,
+        )
+        _http_session.mount('https://', adapter)
+        _http_session.mount('http://', adapter)
+    return _http_session
+
+
+def get_cached_or_fetch(cache_key, fetch_func, ttl=86400):
+    """Get data from cache or fetch and cache it.
+    
+    Args:
+        cache_key: Redis cache key string
+        fetch_func: Callable that returns the data to cache
+        ttl: Time-to-live in seconds (default 24h)
+    
+    Returns:
+        The cached or freshly fetched data
+    """
+    cached = cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return cached
+    
+    logger.debug(f"Cache miss: {cache_key} — fetching")
+    data = fetch_func()
+    if data is not None:
+        cache.set(cache_key, data, timeout=ttl)
+    return data
+
 
 def fetch_image_metadata(url):
     """
     Fetch image metadata (file size, dimensions) using SERP API image search.
+    Results are cached for 24 hours since metadata rarely changes.
+    
     Returns a dict with file_size_bytes and dimensions.
     """
     logger.info(f"Fetching metadata for image URL: {url}")
+    
+    cache_key = f"metadata:{url}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Metadata cache hit: {url[:60]}")
+        return cached
 
     try:
         from serpapi import GoogleSearch
@@ -122,6 +183,7 @@ def fetch_image_metadata(url):
                         logger.warning(f"Error parsing dimensions for {url}: {str(e)}")
 
         logger.info(f"Successfully fetched metadata for {url}: {metadata}")
+        cache.set(cache_key, metadata, timeout=getattr(settings, 'CACHE_METADATA_TTL', 86400))
         return metadata
 
     except Exception as e:
@@ -135,24 +197,25 @@ def fetch_image_metadata(url):
 def crawl_image(url, attempt=1, max_retries=2):
     """
     Crawl the actual page URL to extract metadata and readable content.
-
+    Results are cached for 7 days since crawled content changes infrequently.
+    
     Retries up to `max_retries` times on transient failures (timeout,
     connection error, server 5xx). Does NOT retry on paywalls, 403s,
     404s, rate limits, or insufficient content.
-
+    
     Replaces the previous RapidAPI-based approach with direct HTTP fetching
     using BeautifulSoup for content extraction. This allows us to:
-
+    
     1. Get the actual page content, not just a domain scrape
     2. Extract metadata: title, publish date, author, domain
     3. Detect paywalls, access blocks, and thin content
     4. Return up to 1000 characters of clean article text
-
+    
     Args:
         url: The page URL to crawl
         attempt: Current attempt number (1-based, internal)
         max_retries: Max attempts before giving up (default 2)
-
+    
     Returns:
         Dict with:
             crawl_status: "success" or "failed"
@@ -167,6 +230,14 @@ def crawl_image(url, attempt=1, max_retries=2):
             attempts: Number of attempts made
     """
     logger.info(f"Crawling page URL: {url} (attempt {attempt}/{max_retries})")
+    
+    # Check cache on first attempt
+    if attempt == 1:
+        cache_key = f"crawl:{url}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Crawl cache hit: {url[:60]}")
+            return cached
 
     if not url:
         logger.warning("No URL provided for crawling")
@@ -178,10 +249,10 @@ def crawl_image(url, attempt=1, max_retries=2):
         domain = domain[4:]
 
     try:
-        # Make a direct HTTP request to the page
-        response = requests.get(
+        # Use the shared session with connection pooling
+        session = _get_http_session()
+        response = session.get(
             url,
-            headers={"User-Agent": _USER_AGENT},
             timeout=_DEFAULT_TIMEOUT,
             allow_redirects=True,
         )
@@ -240,7 +311,7 @@ def crawl_image(url, attempt=1, max_retries=2):
 
         if not raw_snippet or len(raw_snippet.strip()) < 50:
             logger.warning(f"Very little content extracted from {url}: {len(raw_snippet) if raw_snippet else 0} chars")
-            return {
+            result = {
                 "crawl_status": "failed",
                 "crawl_error": "Insufficient content extracted",
                 "crawled_at": datetime.utcnow().isoformat(),
@@ -252,6 +323,10 @@ def crawl_image(url, attempt=1, max_retries=2):
                 "paywall_detected": paywall_detected,
                 "attempts": attempt,
             }
+            # Cache failures too (shorter TTL)
+            if attempt == 1:
+                cache.set(cache_key, result, timeout=3600)
+            return result
 
         logger.info(
             f"Successfully crawled {url} (attempt {attempt}/{max_retries}): "
@@ -262,7 +337,7 @@ def crawl_image(url, attempt=1, max_retries=2):
             f"paywall={paywall_detected}"
         )
 
-        return {
+        result = {
             "crawl_status": "success",
             "crawl_error": None,
             "crawled_at": datetime.utcnow().isoformat(),
@@ -274,6 +349,12 @@ def crawl_image(url, attempt=1, max_retries=2):
             "paywall_detected": paywall_detected,
             "attempts": attempt,
         }
+        
+        # Cache successful crawls for 7 days
+        if attempt == 1:
+            cache.set(cache_key, result, timeout=getattr(settings, 'CACHE_CRAWL_TTL', 604800))
+        
+        return result
 
     except requests.exceptions.Timeout:
         logger.warning(f"Timeout crawling {url} (attempt {attempt}/{max_retries})")
@@ -524,9 +605,8 @@ def _extract_readable_content(soup, max_chars=1000):
     # Extract text
     text = content.get_text(separator=" ", strip=True)
 
-    # Clean excessive whitespace
-    import re
-    text = re.sub(r'\s+', ' ', text).strip()
+    # Clean excessive whitespace using pre-compiled regex
+    text = _RE_WHITESPACE.sub(' ', text).strip()
 
     return text[:max_chars]
 

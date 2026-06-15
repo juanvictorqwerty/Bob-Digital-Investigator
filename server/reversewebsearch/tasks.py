@@ -76,42 +76,122 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
                 }
             )
 
-        # Step 5: Crawling top 5 sources (90-95%)
+        # Step 5: Crawling top 10 sources (85-95%)
         self.update_state(
             state="PROGRESS",
             meta={
                 "step": "crawling",
-                "message": "Crawling top sources (0/5)…",
-                "data": {"current": 0, "total": 5}
+                "message": "Crawling top sources (0/10)…",
+                "data": {"current": 0, "total": 10}
             }
         )
 
-        # Select top 5 images for crawling
-        top_5_for_crawling = enriched_candidates[:5]
-        logger.info(f"Selected top 5 candidates for crawling")
+        # Import miniature/sublink detection
+        from reversewebsearch.data_processor import is_miniature_or_sublink
 
-        # Crawl only the top 5 images (90-95%)
-        for j, result in enumerate(top_5_for_crawling):
-            page_url = result.get('page_url') or result.get('image_url')
-            if page_url:
-                logger.info(f"Crawling URL: {page_url}")
-                crawl_data = crawl_image(page_url)
+        # We have 20 enriched candidates — crawl up to 10 successful sources,
+        # skipping miniatures/sublinks and paywalled content, pulling replacements
+        # from deeper in the candidate pool.
+        logger.info(f"Starting crawl of top sources (pool size: {len(enriched_candidates)})")
+
+        # Track crawl results for status summary
+        successful_crawls = 0
+        failed_crawls = 0
+        skipped_paywall = 0
+        failed_domains = []
+        attempted_count = 0
+        max_attempts = min(15, len(enriched_candidates))  # try up to 15 candidates to get 10 good ones
+        target_successful = 10
+
+        # Crawl sources, skip paywalled ones, pull replacements from pool
+        for j in range(max_attempts):
+            result = enriched_candidates[j]
+            skip_reason = None
+
+            # Check 1: Miniature or sublink — crawl the page_url instead
+            if is_miniature_or_sublink(result):
+                target_url = result.get('page_url')
+                skip_reason = "miniature/sublink"
+                logger.info(f"Candidate {j+1} is a miniature/sublink — using page URL: {target_url}")
+            else:
+                target_url = result.get('page_url') or result.get('image_url')
+
+            if target_url:
+                logger.info(f"Crawling candidate {j+1}/{max_attempts}: {target_url}")
+                crawl_data = crawl_image(target_url)
                 result['crawl_data'] = crawl_data
+
+                # Check 2: Paywall detected — skip this result, try next candidate
+                if crawl_data.get("paywall_detected") and crawl_data.get("crawl_status") == "success":
+                    skipped_paywall += 1
+                    failed_crawls += 1
+                    domain = crawl_data.get("domain") or result.get("domain", "unknown")
+                    failed_domains.append(domain)
+                    logger.info(f"Paywall detected on {domain} — skipping, will try next candidate")
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={
+                            "step": "crawling",
+                            "message": f"Paywall on {domain}, trying next source…",
+                            "data": {
+                                "current": successful_crawls,
+                                "total": target_successful,
+                                "url": target_url,
+                                "successful": successful_crawls,
+                                "failed": failed_crawls,
+                                "paywall_skipped": skipped_paywall,
+                            }
+                        }
+                    )
+                    continue  # try next candidate
+
+                if crawl_data.get("crawl_status") == "success":
+                    successful_crawls += 1
+                else:
+                    failed_crawls += 1
+                    domain = crawl_data.get("domain") or result.get("domain", "unknown")
+                    failed_domains.append(domain)
+            else:
+                logger.warning(f"Candidate {j+1} has no URL to crawl — marking as failed")
+                result['crawl_data'] = {
+                    "crawl_status": "failed",
+                    "crawl_error": "No URL available",
+                    "crawled_at": None,
+                    "raw_snippet": None,
+                }
+                failed_crawls += 1
+
+            attempted_count += 1
             
-            # Update progress (90% to 95%)
-            progress = 90 + int((j + 1) / 5 * 5)
+            # Update progress
+            progress = 85 + int(min(attempted_count, target_successful) / target_successful * 10)
             self.update_state(
                 state="PROGRESS",
                 meta={
                     "step": "crawling",
-                    "message": f"Crawling source {j + 1}/5…",
+                    "message": f"Crawl progress: {successful_crawls} successful, {failed_crawls} failed, {skipped_paywall} paywall-skipped",
                     "data": {
-                        "current": j + 1,
-                        "total": 5,
-                        "url": page_url if page_url else ""
+                        "current": successful_crawls,
+                        "total": target_successful,
+                        "url": target_url if target_url else "",
+                        "successful": successful_crawls,
+                        "failed": failed_crawls,
+                        "paywall_skipped": skipped_paywall,
                     }
                 }
             )
+
+            # Stop early if we have enough successful (non-paywalled) crawls
+            if successful_crawls >= target_successful:
+                logger.info(f"Reached target of {target_successful} successful crawls after {attempted_count} attempts")
+                break
+
+        # Log crawl summary
+        logger.info(
+            f"Crawl summary: {successful_crawls}/10 successful, "
+            f"{failed_crawls} failed. "
+            f"Failed domains: {failed_domains if failed_domains else 'none'}"
+        )
 
         # Update processed data with enriched candidates
         processed_data['top_candidates'] = enriched_candidates

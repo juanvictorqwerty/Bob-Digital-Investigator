@@ -12,6 +12,51 @@ from .llm_client import build_analysis_prompt, analyze_with_openrouter
 logger = logging.getLogger(__name__)
 
 
+def _compute_crawl_status(top_candidates):
+    """
+    Compute crawl status statistics from the top candidates' crawl_data.
+
+    Returns a dict suitable for inclusion in the LLM statistics:
+    {
+        "results_crawled": int,
+        "successful_crawls": int,
+        "failed_crawls": int,
+        "failed_domains": list[str]
+    }
+    """
+    results_crawled = 0
+    successful_crawls = 0
+    failed_crawls = 0
+    failed_domains = []
+
+    for c in top_candidates[:15]:
+        crawl_data = c.get("crawl_data") or {}
+        status = crawl_data.get("crawl_status")
+        if not status:
+            continue
+        results_crawled += 1
+        if status == "success":
+            # Count paywalled successes separately — content may be truncated
+            if crawl_data.get("paywall_detected"):
+                # Still counts as a successful crawl for context, but note the paywall
+                successful_crawls += 1
+                failed_domains.append(f"{c.get('domain', '?')} (paywall)")
+            else:
+                successful_crawls += 1
+        elif status == "failed":
+            failed_crawls += 1
+            domain = crawl_data.get("domain") or c.get("domain", "unknown")
+            if domain and domain != "unknown":
+                failed_domains.append(domain)
+
+    return {
+        "results_crawled": results_crawled,
+        "successful_crawls": successful_crawls,
+        "failed_crawls": failed_crawls,
+        "failed_domains": failed_domains,
+    }
+
+
 def run_robot_analysis(websearch_result, processed_data):
     """
     Main entry point — run the full hybrid analysis pipeline.
@@ -34,6 +79,9 @@ def run_robot_analysis(websearch_result, processed_data):
     top_candidates = processed_data.get("top_candidates", [])
     timeline = processed_data.get("timeline", [])
     statistics = processed_data.get("statistics", {})
+
+    # NEW: Inject crawl_status into statistics for the LLM prompt
+    statistics["crawl_status"] = _compute_crawl_status(top_candidates)
 
     # Step 1: Run rules-based heuristics
     rules_assessment = _rules_based_assessment(websearch_result, top_candidates, timeline, statistics)
@@ -153,12 +201,25 @@ def _rules_based_assessment(websearch_result, top_candidates, timeline, statisti
     else:
         assessment["source_quality"] = f"{total} sources — robust evidence"
 
-    # 5. Crawl data quality
+    # 5. Crawl data quality (top 10)
     successful_crawls = sum(
-        1 for c in top_candidates[:5]
+        1 for c in top_candidates[:10]
         if c.get("crawl_data", {}).get("crawl_status") == "success"
     )
-    assessment["successful_crawls"] = f"{successful_crawls}/5 top sources crawled successfully"
+    failed_crawls = sum(
+        1 for c in top_candidates[:10]
+        if c.get("crawl_data", {}).get("crawl_status") == "failed"
+    )
+    failed_domains = []
+    for c in top_candidates[:10]:
+        crawl_data = c.get("crawl_data") or {}
+        if crawl_data.get("crawl_status") == "failed":
+            domain = crawl_data.get("domain") or c.get("domain", "unknown")
+            if domain and domain != "unknown":
+                failed_domains.append(domain)
+
+    assessment["successful_crawls"] = f"{successful_crawls}/10 top sources crawled successfully"
+    assessment["failed_crawls"] = f"{failed_crawls}/10 crawls failed"
 
     # 6. Check for user query significance
     assessment["user_query_provided"] = bool(websearch_result.query) if hasattr(websearch_result, "query") else False

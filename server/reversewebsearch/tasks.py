@@ -1,13 +1,18 @@
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import logging
-from .utils import fetch_image_metadata, crawl_image
+from .utils import fetch_image_metadata, crawl_image, _get_http_session
 from .models import WebsearchResults
 from .data_processor import process_reverse_search_results
 from robot.analysis_pipeline import run_robot_analysis
 
 logger = logging.getLogger(__name__)
+
+# Max parallel workers for concurrent crawling
+_MAX_CRAWL_WORKERS = 10
 
 
 @shared_task(bind=True)
@@ -26,7 +31,7 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             }
         )
 
-        # Perform OpenWebNinja reverse image search
+        # Perform OpenWebNinja reverse image search (with caching)
         all_raw_results = _perform_openwebninja_search(image_url)
         logger.info(f"Found {len(all_raw_results)} results from OpenWebNinja")
 
@@ -41,7 +46,7 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             }
         )
 
-        # Step 3: Process results through data pipeline (20-80%)
+        # Step 3: Process results through data pipeline (20-30%)
         self.update_state(
             state="PROGRESS",
             meta={
@@ -53,7 +58,7 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
         # Process through the data pipeline (normalize, deduplicate, enrich, score, rank)
         processed_data = process_reverse_search_results(all_raw_results)
         
-        # Step 4: Fetch metadata for top candidates (80-90%)
+        # Step 4: Fetch metadata for top candidates (30-50%)
         top_candidates = processed_data['top_candidates']
         enriched_candidates = []
         for i, result in enumerate(top_candidates):
@@ -65,8 +70,8 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
                 result['image_metadata'] = metadata
             enriched_candidates.append(result)
             
-            # Update progress (80% to 90%)
-            progress = 80 + int((i + 1) / len(top_candidates) * 10)
+            # Update progress (30% to 50%)
+            progress = 30 + int((i + 1) / len(top_candidates) * 20)
             self.update_state(
                 state="PROGRESS",
                 meta={
@@ -76,42 +81,107 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
                 }
             )
 
-        # Step 5: Crawling top 5 sources (90-95%)
+        # Step 5: Crawling top 10 sources IN PARALLEL (50-80%)
         self.update_state(
             state="PROGRESS",
             meta={
                 "step": "crawling",
-                "message": "Crawling top sources (0/5)…",
-                "data": {"current": 0, "total": 5}
+                "message": "Crawling top sources…",
+                "data": {"current": 0, "total": 10}
             }
         )
 
-        # Select top 5 images for crawling
-        top_5_for_crawling = enriched_candidates[:5]
-        logger.info(f"Selected top 5 candidates for crawling")
+        # Import miniature/sublink detection
+        from reversewebsearch.data_processor import is_miniature_or_sublink
 
-        # Crawl only the top 5 images (90-95%)
-        for j, result in enumerate(top_5_for_crawling):
-            page_url = result.get('page_url') or result.get('image_url')
-            if page_url:
-                logger.info(f"Crawling URL: {page_url}")
-                crawl_data = crawl_image(page_url)
-                result['crawl_data'] = crawl_data
-            
-            # Update progress (90% to 95%)
-            progress = 90 + int((j + 1) / 5 * 5)
-            self.update_state(
-                state="PROGRESS",
-                meta={
-                    "step": "crawling",
-                    "message": f"Crawling source {j + 1}/5…",
-                    "data": {
-                        "current": j + 1,
-                        "total": 5,
-                        "url": page_url if page_url else ""
-                    }
-                }
-            )
+        # We have 20 enriched candidates — crawl up to 10 successful sources,
+        # skipping miniatures/sublinks and paywalled content, pulling replacements
+        # from deeper in the candidate pool.
+        logger.info(f"Starting parallel crawl of top sources (pool size: {len(enriched_candidates)})")
+
+        # Track crawl results for status summary
+        successful_crawls = 0
+        failed_crawls = 0
+        skipped_paywall = 0
+        failed_domains = []
+        max_attempts = min(15, len(enriched_candidates))
+        target_successful = 10
+
+        # Build a list of crawl tasks: (index, result, target_url)
+        crawl_tasks = []
+        for j in range(max_attempts):
+            result = enriched_candidates[j]
+            if is_miniature_or_sublink(result):
+                target_url = result.get('page_url')
+            else:
+                target_url = result.get('page_url') or result.get('image_url')
+            crawl_tasks.append((j, result, target_url))
+
+        # Crawl in parallel using ThreadPoolExecutor
+        crawled_count = 0
+        with ThreadPoolExecutor(max_workers=_MAX_CRAWL_WORKERS) as executor:
+            # Submit all crawl jobs
+            future_to_idx = {
+                executor.submit(_crawl_single_source, idx, result, target_url): idx
+                for idx, result, target_url in crawl_tasks
+            }
+
+            # Process results as they complete
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    crawl_data, domain = future.result()
+                except Exception as e:
+                    logger.error(f"Unexpected error crawling task {idx}: {str(e)}")
+                    continue
+
+                enriched_candidates[idx]['crawl_data'] = crawl_data
+
+                # Handle paywalled content
+                if crawl_data.get("paywall_detected") and crawl_data.get("crawl_status") == "success":
+                    skipped_paywall += 1
+                    failed_crawls += 1
+                    failed_domains.append(domain)
+                    status = "skipped"
+                elif crawl_data.get("crawl_status") == "success":
+                    successful_crawls += 1
+                    status = "done"
+                else:
+                    failed_crawls += 1
+                    failed_domains.append(domain)
+                    status = "error"
+
+                crawled_count += 1
+
+                # Push per-source status (throttled: update every 2 results)
+                if crawled_count % 2 == 0 or successful_crawls >= target_successful:
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={
+                            "step": "crawl_result",
+                            "message": f"Source {crawled_count}/{target_successful}",
+                            "data": {
+                                "c": successful_crawls,
+                                "t": target_successful,
+                                "s": status,
+                                "d": domain,
+                            }
+                        }
+                    )
+
+                # Stop early if we have enough successful crawls
+                if successful_crawls >= target_successful:
+                    # Cancel remaining futures
+                    for f in future_to_idx:
+                        f.cancel()
+                    break
+
+        # Log crawl summary
+        logger.info(
+            f"Crawl summary: {successful_crawls}/10 successful, "
+            f"{failed_crawls} failed. "
+            f"Failed domains: {failed_domains if failed_domains else 'none'}"
+        )
 
         # Update processed data with enriched candidates
         processed_data['top_candidates'] = enriched_candidates
@@ -127,7 +197,7 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
             except User.DoesNotExist:
                 logger.warning(f"User with id {user_id} not found")
 
-        # Step 6: Robot AI analysis (96-98%)
+        # Step 6: Robot AI analysis (80-90%)
         self.update_state(
             state="PROGRESS",
             meta={
@@ -164,11 +234,41 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
         raise
 
 
+def _crawl_single_source(idx, result, target_url):
+    """Crawl a single source URL and return (crawl_data, domain).
+    
+    This is a standalone function so it can be pickled by ThreadPoolExecutor.
+    """
+    if not target_url:
+        return ({
+            "crawl_status": "failed",
+            "crawl_error": "No URL available",
+            "crawled_at": None,
+            "raw_snippet": None,
+        }, "unknown")
+
+    domain = result.get('domain', '')
+    logger.info(f"Crawling candidate {idx+1}: {target_url}")
+    crawl_data = crawl_image(target_url)
+    crawl_domain = crawl_data.get("domain") or domain
+    return crawl_data, crawl_domain
+
+
 def _perform_openwebninja_search(image_url):
     """
     Perform reverse image search using OpenWebNinja API.
+    Results are cached for 24 hours since the same image search
+    typically returns the same results.
+    
     Returns list of results with engine field set to 'openwebninja'.
     """
+    # Check cache first
+    cache_key = f"openwebninja:{image_url}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        logger.info(f"OpenWebNinja cache hit for: {image_url[:60]}")
+        return cached
+
     api_key = settings.REVERSE_IMAGE_API_KEY
     if not api_key:
         logger.error("OpenWebNinja API key not configured (REVERSE_IMAGE)")
@@ -183,7 +283,10 @@ def _perform_openwebninja_search(image_url):
         params = {"url": image_url}
         
         logger.info(f"Calling OpenWebNinja reverse image search for: {image_url}")
-        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        # Use the shared session with connection pooling
+        session = _get_http_session()
+        response = session.get(url, headers=headers, params=params, timeout=30)
         response.raise_for_status()
         
         result = response.json()
@@ -205,6 +308,9 @@ def _perform_openwebninja_search(image_url):
                 "image_metadata": None,
                 "extracted_text": ""
             })
+        
+        # Cache the results
+        cache.set(cache_key, formatted_results, timeout=getattr(settings, 'CACHE_EXTERNAL_API_TTL', 86400))
         
         return formatted_results
         
@@ -234,7 +340,7 @@ def _extract_domain_from_link(url):
     except Exception:
         return ""
 
-
+# Keep the original utility functions that are still used by the pipeline
 def _extract_published_date(match):
     """Extract published date from match data."""
     from datetime import datetime

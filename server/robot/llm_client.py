@@ -4,6 +4,7 @@ Uses openai-compatible API to send prompts to OpenRouter.
 """
 import json
 import logging
+from io import StringIO
 from django.conf import settings
 from openai import OpenAI
 
@@ -15,8 +16,11 @@ DEFAULT_MODEL = "openai/gpt-4o-mini"
 # Fallback model if the primary is unavailable
 FALLBACK_MODEL = "anthropic/claude-3-haiku"
 
+# Valid system verdicts for validation
+VALID_VERDICTS = {"real", "likely", "fake", "suspicious", "unconfirmed"}
 
-def get_openrouter_client():
+
+def get_openrouter_client() -> OpenAI:
     """Return an OpenAI client configured to point at OpenRouter."""
     api_key = settings.OPENROUTER_API_KEY
     if not api_key:
@@ -31,7 +35,7 @@ def get_openrouter_client():
     )
 
 
-def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_assessment):
+def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_assessment) -> str:
     """
     Build a structured prompt for the LLM.
 
@@ -45,51 +49,41 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
     Returns:
         String prompt
     """
-    # Build candidates section (top 10) — include FULL crawl snippet
-    candidates_lines = []
+    # Build candidates section using StringIO for efficient string concatenation
+    candidates_buffer = StringIO()
     for i, c in enumerate(top_candidates[:10], 1):
-        publish_date = c.get("publish_date", "N/A") or "N/A"
+        publish_date = c.get("publish_date") or "N/A"
         score = c.get("score", "N/A")
         domain = c.get("domain", "unknown")
         title = c.get("title", "No title")
         engine = c.get("engine", "unknown")
 
-        # Crawl snippet (full — up to 1000 chars)
-        crawl_data = c.get("crawl_data", {}) or {}
+        crawl_data = c.get("crawl_data") or {}
         snippet = ""
         if crawl_data.get("crawl_status") == "success":
             raw = crawl_data.get("raw_snippet", "")
             if raw:
                 snippet = raw[:1000]
 
-        candidates_lines.append(
+        candidates_buffer.write(
             f"  [{i}] Score: {score} | Domain: {domain} | Engine: {engine}\n"
             f"      Title: {title}\n"
             f"      Published: {publish_date}\n"
-            f"      Crawled page content:\n{snippet}\n"
+            f"      Crawled page content:\n{snippet}\n\n"
         )
 
-    candidates_text = "\n".join(candidates_lines)
-
-    # Build timeline section
-    timeline_lines = []
-    for entry in timeline:
-        d = entry.get("date", "?")
-        dom = entry.get("domain", "?")
-        timeline_lines.append(f"  {d} — {dom}")
+    # Build timeline entries
+    timeline_lines = [f"  {e.get('date', '?')} — {e.get('domain', '?')}" for e in timeline]
     timeline_text = "\n".join(timeline_lines) if timeline_lines else "  (No timeline data available)"
+    
+    # Build rules entries
+    rules_text = "\n".join([f"  - {k}: {v}" for k, v in rules_assessment.items()])
 
-    # Build rules assessment
-    rules_lines = []
-    for key, val in rules_assessment.items():
-        rules_lines.append(f"  - {key}: {val}")
-    rules_text = "\n".join(rules_lines)
-
-    # Detect and highlight crawl data anomalies
+    # Detect crawl anomalies dynamically
     crawl_anomalies = _detect_crawl_anomalies(top_candidates)
     crawl_text = "\n".join(crawl_anomalies) if crawl_anomalies else "  None detected."
 
-    prompt = f"""You are a digital forensics and misinformation analysis expert. Your job is to analyze reverse image search results to verify or debunk a specific claim made by the user.
+    return f"""You are a digital forensics and misinformation analysis expert. Your job is to analyze reverse image search results to verify or debunk a specific claim made by the user.
 
 ## THE USER'S CLAIM TO FACT-CHECK
 {query or "(No additional claim provided by the user)"}
@@ -98,7 +92,7 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
 
 ## Ranked Search Results (top 10 by relevance score)
 Each result includes crawled page content from the source.
-{candidates_text}
+{candidates_buffer.getvalue()}
 
 ## Publication Timeline
 (Chronological spread of sources found)
@@ -117,40 +111,34 @@ Each result includes crawled page content from the source.
 {rules_text}
 
 ## Analysis Instructions
-1. **Evaluate the user's claim** — Does the crawled page content support or contradict what the user suspects? Does the claim appear in multiple independent sources?
+1. **Evaluate the user's claim** — Does the crawled page content support or contradict what the user suspects?
 2. **Check date consistency** — Are all sources from the same narrow timeframe (suggesting a coordinated push)? Or is there a natural chronological spread?
 3. **Evaluate source credibility** — Are the top sources from known reputable/trusted domains? Or from obscure/untrustworthy domains?
-4. **Look for corroboration** — Do results from different sources carry consistent information?
-5. **Examine crawl data** — Do the crawled snippets contain sensational language, contradictory claims, lack of factual reporting, or AI-generated text?
-6. **Cross-check the image** — Does the image appear in contexts that match its original purpose, or is it being used misleadingly?
+4. **Examine crawl data** — Do the crawled snippets contain sensational language, contradictory claims, lack of factual reporting, or AI-generated text?
 
 ## Output Format
-Respond with **valid JSON only** — no markdown fences, no extra text.
-
+Respond with a strict JSON object that matches this exact schema:
 {{
-  "verdict": "real|fake|suspicious|unconfirmed",
-  "confidence": <0.0 to 1.0>,
-  "short_summary": "<One short sentence explaining the verdict>",
-  "explanation": "<Detailed 3-6 sentence explanation of your reasoning, referencing the user's claim and the crawled content>",
+  "verdict": "real|likely|fake|suspicious|unconfirmed",
+  "confidence": 0.0 to 1.0,
+  "short_summary": "One short sentence explaining the verdict",
+  "explanation": "Detailed 3-6 sentence explanation of your reasoning, referencing the user's claim and the crawled content",
   "key_evidence": [
-    "<Specific evidence item 1 from crawled content>",
-    "<Specific evidence item 2 from crawled content>",
-    "<Specific evidence item 3 from crawled content>"
+    "Specific evidence item 1 from crawled content",
+    "Specific evidence item 2 from crawled content"
   ]
 }}
 
 **Verdict meanings:**
-- "real" — Strong evidence the content is authentic/genuine news; the user's claim is supported
-- "fake" — Strong evidence of misinformation, manipulation, or false claims; the user's claim is contradicted
-- "suspicious" — Some red flags but not conclusive
-- "unconfirmed" — Insufficient data to make a determination
-
-Now analyze the data and return your verdict.
+- "real" — Strong evidence the content is authentic/genuine news; the user's claim is supported by highly trusted/authoritative domains.
+- "likely" — Multiple independent, non-trusted or secondary sources clearly corroborate and confirm the user's claim, though high-authority trusted domains haven't verified it yet.
+- "fake" — Strong evidence of misinformation, manipulation, or false claims; the user's claim is contradicted.
+- "suspicious" — Some red flags but not conclusive.
+- "unconfirmed" — Insufficient data to make a determination.
 """
-    return prompt
 
 
-def _detect_crawl_anomalies(top_candidates):
+def _detect_crawl_anomalies(top_candidates) -> list:
     """
     Detect suspicious patterns in crawled page content.
 
@@ -161,54 +149,41 @@ def _detect_crawl_anomalies(top_candidates):
         List of anomaly description strings
     """
     anomalies = []
+    ai_markers = ["as an ai", "as a language model", "i cannot", "i don't have"]
+    sensational = ["breaking!", "shocking!", "you won't believe", "viral", "must see", "urgent"]
 
     for c in top_candidates[:5]:
-        crawl_data = c.get("crawl_data", {}) or {}
+        crawl_data = c.get("crawl_data") or {}
         if crawl_data.get("crawl_status") != "success":
             continue
 
-        snippet = crawl_data.get("raw_snippet", "") or ""
+        snippet = (crawl_data.get("raw_snippet") or "").strip()
+        domain = c.get('domain', '?')
 
-        if not snippet or len(snippet.strip()) < 50:
-            anomalies.append(
-                f"  - {c.get('domain', '?')}: Crawled page has very little content "
-                f"({len(snippet.strip())} chars) — may be a low-quality or auto-generated page."
-            )
+        if not snippet or len(snippet) < 50:
+            anomalies.append(f"  - {domain}: Crawled page has very little content ({len(snippet)} chars) — may be low-quality.")
             continue
 
-        # Check for AI-generated text markers
-        ai_markers = ["as an ai", "as a language model", "i cannot", "i don't have"]
         snippet_lower = snippet.lower()
         for marker in ai_markers:
             if marker in snippet_lower:
-                anomalies.append(
-                    f"  - {c.get('domain', '?')}: Page content contains AI disclaimer ('{marker}') "
-                    f"— possible AI-generated or placeholder content."
-                )
+                anomalies.append(f"  - {domain}: Page content contains AI disclaimer ('{marker}') — possible AI placeholder.")
                 break
 
-        # Check for sensational language
-        sensational = ["breaking!", "shocking!", "you won't believe", "viral", "must see", "urgent"]
         sensational_found = [w for w in sensational if w in snippet_lower]
         if sensational_found:
-            anomalies.append(
-                f"  - {c.get('domain', '?')}: Sensational language detected: {sensational_found}"
-            )
+            anomalies.append(f"  - {domain}: Sensational language detected: {sensational_found}")
 
-        # Check for extremely short pages (thin content)
         word_count = len(snippet.split())
         if word_count < 30:
-            anomalies.append(
-                f"  - {c.get('domain', '?')}: Very thin page content ({word_count} words) "
-                f"— may be a spam or placeholder page."
-            )
+            anomalies.append(f"  - {domain}: Very thin page content ({word_count} words) — may be a spam page.")
 
     return anomalies
 
 
-def analyze_with_openrouter(prompt, model=None):
+def analyze_with_openrouter(prompt: str, model: str = None) -> tuple:
     """
-    Send prompt to OpenRouter and return parsed response.
+    Send prompt to OpenRouter and return parsed response with a fallback mechanism.
 
     Args:
         prompt: The full LLM prompt string
@@ -216,42 +191,40 @@ def analyze_with_openrouter(prompt, model=None):
 
     Returns:
         Tuple of (verdict_dict, raw_response_json)
-        verdict_dict = { "verdict": str, "confidence": float, "explanation": str, "key_evidence": list }
     """
     model = model or DEFAULT_MODEL
 
     try:
         client = get_openrouter_client()
-
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=2000,
+            # Native JSON enforcement at the API gateway layer
+            response_format={"type": "json_object"}
         )
 
         raw_content = response.choices[0].message.content.strip()
+        
+        usage = response.usage
         raw_response = {
             "model": model,
             "content": raw_content,
             "usage": {
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else None,
-                "completion_tokens": response.usage.completion_tokens if response.usage else None,
-                "total_tokens": response.usage.total_tokens if response.usage else None,
+                "prompt_tokens": usage.prompt_tokens if usage else None,
+                "completion_tokens": usage.completion_tokens if usage else None,
+                "total_tokens": usage.total_tokens if usage else None,
             }
         }
 
-        # Parse JSON from response
         parsed = _parse_llm_response(raw_content)
-
         return parsed, raw_response
 
     except Exception as e:
         logger.error(f"OpenRouter call failed with {model}: {str(e)}")
 
-        # Try fallback model
+        # Clean fallback escalation block
         if model != FALLBACK_MODEL:
             logger.info(f"Falling back to {FALLBACK_MODEL}...")
             try:
@@ -259,75 +232,61 @@ def analyze_with_openrouter(prompt, model=None):
             except Exception as fallback_err:
                 logger.error(f"Fallback also failed: {str(fallback_err)}")
 
-        # Return None so caller can use rules-based fallback
-        return None, {"error": str(e)}
+        return _default_verdict(), {"error": str(e)}
 
 
-def _parse_llm_response(content):
+def _parse_llm_response(content: str) -> dict:
     """
-    Parse the LLM JSON response, handling markdown fences and stray text.
+    Parse and clean the LLM structured JSON response.
 
     Args:
         content: Raw string response from LLM
 
     Returns:
-        Dict with verdict, confidence, explanation, key_evidence
+        Dict with verdict, confidence, short_summary, explanation, key_evidence
     """
-    # Strip markdown code fences if present
+    # Clean up standard markdown wrappers if fallback providers inject them despite constraints
     content = content.strip()
     if content.startswith("```"):
-        # Remove opening fence (possibly with json keyword)
         content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-        # Remove closing fence if present
         if content.endswith("```"):
             content = content.rsplit("```", 1)[0]
         content = content.strip()
 
-    # Try to find JSON object
     try:
-        # Find first { and last }
         start = content.index("{")
         end = content.rindex("}") + 1
-        json_str = content[start:end]
-        data = json.loads(json_str)
+        data = json.loads(content[start:end])
     except (ValueError, json.JSONDecodeError) as e:
-        logger.warning(f"Failed to parse LLM JSON response: {e}")
-        logger.debug(f"Raw content: {content[:500]}")
+        logger.warning(f"Failed to parse LLM JSON response payload: {e}")
         return _default_verdict()
 
-    # Validate fields
-    verdict = data.get("verdict", "unconfirmed")
-    if verdict not in ("real", "fake", "suspicious", "unconfirmed"):
+    # Normalize verdict string mapping
+    verdict = data.get("verdict", "unconfirmed").lower().strip()
+    if verdict not in VALID_VERDICTS:
         verdict = "unconfirmed"
 
-    confidence = data.get("confidence", 0.0)
+    # Normalize and contain confidence ratings
     try:
-        confidence = float(confidence)
-        confidence = max(0.0, min(1.0, confidence))
+        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
     except (ValueError, TypeError):
         confidence = 0.0
-
-    short_summary = data.get("short_summary", "")
-    explanation = data.get("explanation", "No explanation provided.")
-    key_evidence = data.get("key_evidence", [])
-    if not isinstance(key_evidence, list):
-        key_evidence = []
 
     return {
         "verdict": verdict,
         "confidence": confidence,
-        "short_summary": short_summary,
-        "explanation": explanation,
-        "key_evidence": key_evidence,
+        "short_summary": str(data.get("short_summary", "")),
+        "explanation": str(data.get("explanation", "No explanation provided.")),
+        "key_evidence": data.get("key_evidence") if isinstance(data.get("key_evidence"), list) else [],
     }
 
 
-def _default_verdict():
-    """Return a safe default verdict when LLM parsing fails."""
+def _default_verdict() -> dict:
+    """Return a safe default verdict when LLM processing fails entirely."""
     return {
         "verdict": "unconfirmed",
         "confidence": 0.0,
         "short_summary": "AI analysis failed — unable to determine authenticity.",
-        "explanation": "Unable to generate AI analysis due to a processing error.",
+        "explanation": "Unable to generate AI analysis due to a processing or network error.",
         "key_evidence": [],
     }

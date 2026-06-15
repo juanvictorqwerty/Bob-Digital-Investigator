@@ -121,73 +121,53 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
                 crawl_data = crawl_image(target_url)
                 result['crawl_data'] = crawl_data
 
-                # Build a result entry for real-time streaming
-                stream_entry = {
-                    "domain": crawl_data.get("domain") or result.get("domain", "unknown"),
-                    "page_title": crawl_data.get("page_title"),
-                    "publish_date": crawl_data.get("publish_date"),
-                    "author": crawl_data.get("author"),
-                    "crawl_status": crawl_data.get("crawl_status"),
-                    "paywall_detected": crawl_data.get("paywall_detected"),
-                    "attempts": crawl_data.get("attempts", 1),
-                    "url": target_url,
-                    "snippet_length": len(crawl_data.get("raw_snippet", "") or ""),
-                }
+                domain = crawl_data.get("domain") or result.get("domain", "unknown")
 
-                # Check 2: Paywall detected — skip this result, try next candidate
+                # Paywall detected — skip, try next candidate
                 if crawl_data.get("paywall_detected") and crawl_data.get("crawl_status") == "success":
                     skipped_paywall += 1
                     failed_crawls += 1
-                    domain = crawl_data.get("domain") or result.get("domain", "unknown")
                     failed_domains.append(domain)
-                    logger.info(f"Paywall detected on {domain} — skipping, will try next candidate")
-                    stream_entry["status"] = "paywall_skipped"
+                    logger.info(f"Paywall on {domain} — skipping")
                     self.update_state(
                         state="PROGRESS",
                         meta={
                             "step": "crawl_result",
-                            "message": f"Paywall on {domain}, trying next source…",
+                            "message": f"Source {successful_crawls + failed_crawls}/{target_successful}",
                             "data": {
-                                "current": successful_crawls,
-                                "total": target_successful,
-                                "url": target_url,
-                                "result": stream_entry,
-                                "successful": successful_crawls,
-                                "failed": failed_crawls,
-                                "paywall_skipped": skipped_paywall,
+                                "c": successful_crawls,
+                                "t": target_successful,
+                                "s": "skipped",
+                                "d": domain,
                             }
                         }
                     )
-                    continue  # try next candidate
+                    continue
 
                 if crawl_data.get("crawl_status") == "success":
                     successful_crawls += 1
-                    stream_entry["status"] = "success"
+                    status = "done"
                 else:
                     failed_crawls += 1
-                    domain = crawl_data.get("domain") or result.get("domain", "unknown")
                     failed_domains.append(domain)
-                    stream_entry["status"] = "failed"
+                    status = "error"
 
-                # Push this crawl result to the client immediately (real-time)
+                # Lightweight per-source status push
                 self.update_state(
                     state="PROGRESS",
                     meta={
                         "step": "crawl_result",
-                        "message": f"Source {successful_crawls + failed_crawls}/{target_successful}: {stream_entry['domain']} — {stream_entry['status']}",
+                        "message": f"Source {successful_crawls + failed_crawls}/{target_successful}",
                         "data": {
-                            "current": successful_crawls,
-                            "total": target_successful,
-                            "url": target_url,
-                            "result": stream_entry,
-                            "successful": successful_crawls,
-                            "failed": failed_crawls,
-                            "paywall_skipped": skipped_paywall,
+                            "c": successful_crawls,
+                            "t": target_successful,
+                            "s": status,
+                            "d": domain,
                         }
                     }
                 )
             else:
-                logger.warning(f"Candidate {j+1} has no URL to crawl — marking as failed")
+                logger.warning(f"Candidate {j+1} has no URL — failed")
                 result['crawl_data'] = {
                     "crawl_status": "failed",
                     "crawl_error": "No URL available",
@@ -199,14 +179,12 @@ def run_reverse_search_pipeline(self, image_url, query, user_id, cloudinary_publ
                     state="PROGRESS",
                     meta={
                         "step": "crawl_result",
-                        "message": f"Source had no URL — marked as failed",
+                        "message": f"Source had no URL",
                         "data": {
-                            "current": successful_crawls,
-                            "total": target_successful,
-                            "result": {"domain": "unknown", "status": "failed", "crawl_status": "failed", "url": None},
-                            "successful": successful_crawls,
-                            "failed": failed_crawls,
-                            "paywall_skipped": skipped_paywall,
+                            "c": successful_crawls,
+                            "t": target_successful,
+                            "s": "error",
+                            "d": "unknown",
                         }
                     }
                 )

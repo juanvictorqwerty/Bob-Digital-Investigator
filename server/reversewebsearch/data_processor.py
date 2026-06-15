@@ -4,6 +4,7 @@ from collections import defaultdict
 import re
 import logging
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -317,60 +318,137 @@ def is_miniature_or_sublink(result):
     return False
 
 
-def score_result(result, engine_counts):
+
+# ── Local geo-signals (your version) ─────────────────────────────────────────
+CAMEROON_KEYWORDS = {
+    'cameroon', 'cameroun', 'yaounde', 'yaoundé', 'douala',
+    'bamenda', 'bafoussam', 'garoua', 'kribi', 'buea', 'limbe'
+}
+
+# ── URL quality heuristics (my version) ──────────────────────────────────────
+_JUNK_URL_RE = re.compile(
+    r'(thumb|thumbnail|mini|small|preview|cache|proxy|cdn[0-9]|resize|w=\d{1,2}[^0-9])',
+    re.IGNORECASE,
+)
+_CLEAN_IMAGE_URL_RE = re.compile(r'\.(jpg|jpeg|png|webp)(\?.*)?$', re.IGNORECASE)
+
+# ── Date-in-URL (your version, slightly widened) ──────────────────────────────
+_DATE_IN_URL_RE = re.compile(r'/20[1-3][0-9]/')  # covers 2010–2039
+
+# Optional — populate if you have a list; empty = no effect on score
+TRUSTED_DOMAINS: set[str] = set()
+
+
+def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int:
     """
-    Score a result based on available metadata and domain trust.
-    
-    Scoring rules:
-    +3 → has publish_date
-    +3 → has image_metadata
-    +2 → trusted domain
-    +1 → high-resolution metadata (if available)
-    +1 → appears across multiple engines
-    -10 → miniature or sublink (will sink it to the bottom)
-    
-    Args:
-        result: Result dict
-        engine_counts: Dict mapping page_url to count of engines that found it
-    
-    Returns:
-        Integer score
+    Merged ranking algorithm optimised for Cameroon / low-metadata environments.
+
+    Scoring is structured in four tiers so the function produces useful
+    rankings even when trust signals and image metadata are entirely absent.
+
+    Tier 1 — universal signals (always available)
+        +4   found by 2+ engines
+        +2   found by 3+ engines (bonus on top of the +4)
+        +2   clean image URL (.jpg/.png/.webp with no junk pattern)
+
+    Tier 2 — local context signals  ← new from your version
+        +3   .cm domain  (high-confidence Cameroonian source)
+        +2   Cameroon keyword in snippet or title
+        +2   year detected in page URL (e.g. /2024/)
+
+    Tier 3 — soft metadata bonuses (present = great, absent = neutral)
+        +2   has publish_date in metadata
+        +2   has image_metadata
+        +1   image is ≥ 800×600  (lowered from 1000×1000 for mobile-first content)
+        +1   trusted domain (no-op when TRUSTED_DOMAINS is empty)
+
+    Tier 4 — graduated penalties (not a single binary gate)
+        -3   junk URL pattern (thumbnails, cache, proxy, resize)
+        -4   miniature image
+        -6   sublink / non-canonical URL
+        -2   no signal at all (floor nudge)
+
+    Max possible score  : 14 pts
+    Without trust/meta  : 4–9 pts  (still useful for ranking)
     """
     score = 0
-    
-    # +3 for publish_date
-    if result.get('publish_date'):
+    page_url   = result.get('page_url', '').lower()
+    image_url  = result.get('image_url', '').lower()
+    snippet    = result.get('snippet', '').lower()
+    title      = result.get('title', '').lower()
+    domain     = result.get('domain', '').lower()
+
+    # ── Tier 1: Universal signals ─────────────────────────────────────────────
+    engine_count = engine_counts.get(page_url, 0)
+    if engine_count >= 2:
+        score += 4
+    if engine_count >= 3:
+        score += 2  # bonus tier — not double-counting, genuine extra confidence
+
+    if image_url:
+        if _CLEAN_IMAGE_URL_RE.search(image_url) and not _JUNK_URL_RE.search(image_url):
+            score += 2
+        elif _JUNK_URL_RE.search(image_url):
+            score -= 3  # catches thumbnails the penalty block might miss
+
+    # ── Tier 2: Local context signals ────────────────────────────────────────
+    # .cm TLD is a strong proxy for Cameroonian origin — no trust list needed.
+    is_cm_domain = domain.endswith('.cm') or '.cm/' in page_url
+    if is_cm_domain:
         score += 3
-    
-    # +3 for image_metadata
-    if result.get('image_metadata'):
-        score += 3
-    
-    # +2 for trusted domain
-    domain = result.get('domain')
-    if is_trusted_domain(domain):
+
+    # Geo-keywords in snippet or title surface locally relevant content
+    # even when the domain isn't .cm (e.g. diaspora blogs, regional portals).
+    has_local_keyword = any(kw in snippet or kw in title for kw in CAMEROON_KEYWORDS)
+    if has_local_keyword and not is_cm_domain:  # avoid stacking with .cm bonus
         score += 2
-    
-    # +1 for high-resolution metadata
+
+    # Date in URL is a lightweight freshness proxy used by many African CMS.
+    if _DATE_IN_URL_RE.search(page_url):
+        score += 2
+
+    # ── Tier 3: Soft metadata bonuses ────────────────────────────────────────
+    if result.get('publish_date'):
+        score += 2  # still rewarded, but no longer a gate signal
+
     metadata = result.get('image_metadata')
     if metadata:
-        width = metadata.get('width') or metadata.get('dimensions', {}).get('width')
-        height = metadata.get('height') or metadata.get('dimensions', {}).get('height')
-        if width and height and width >= 1000 and height >= 1000:
-            score += 1
-    
-    # +1 for appearing across multiple engines
-    page_url = result.get('page_url')
-    if page_url and engine_counts.get(page_url, 0) > 1:
-        score += 1
-    
-    # -10 for miniature or sublink (heavy penalty to sink ranking)
-    if is_miniature_or_sublink(result):
-        score -= 10
-        logger.debug(f"Applied miniature penalty to: {result.get('image_url', '')[:80]}")
-    
-    return score
+        score += 2
 
+        # Lowered resolution threshold: 800×600 covers most mobile-shot images
+        # common on Cameroonian social-media reposts and local news sites.
+        width  = metadata.get('width')  or metadata.get('dimensions', {}).get('width',  0)
+        height = metadata.get('height') or metadata.get('dimensions', {}).get('height', 0)
+        if width and height and int(width) >= 800 and int(height) >= 600:
+            score += 1
+
+    # Trust bonus is optional — when TRUSTED_DOMAINS is empty this is a no-op.
+    if TRUSTED_DOMAINS and is_trusted_domain(domain):
+        score += 1
+
+    # ── Tier 4: Graduated penalties ──────────────────────────────────────────
+    # Split miniature vs sublink so you can tune them independently in the future.
+    if is_miniature_or_sublink(result):
+        if is_sublink(result):
+            score -= 6
+            logger.debug(f"Sublink penalty: {image_url[:80]}")
+        else:
+            score -= 4
+            logger.debug(f"Miniature penalty: {image_url[:80]}")
+
+    # Gentle floor-nudge for results with zero positive signal of any kind.
+    has_any_signal = (
+        engine_count >= 2
+        or result.get('publish_date')
+        or metadata
+        or is_cm_domain
+        or has_local_keyword
+        or (TRUSTED_DOMAINS and is_trusted_domain(domain))
+    )
+    if not has_any_signal:
+        score -= 2
+
+    return score
 
 def rank_results(results):
     """

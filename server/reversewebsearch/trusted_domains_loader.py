@@ -21,6 +21,11 @@ _trusted_data: dict = {}
 _trusted_domains: set[str] = set()
 _certified_facebook_pages: set[str] = set()
 _trusted_suffixes: set[str] = set()
+_cameroon_keywords: set[str] = set()
+_government_tlds: set[str] = set()
+_official_presidential_domains: set[str] = set()
+_tier1_news_agencies: set[str] = set()
+_tier1_african_news: set[str] = set()
 
 
 def _load_config() -> dict:
@@ -50,6 +55,8 @@ def reload_config() -> None:
     Call this if the JSON file is updated at runtime.
     """
     global _trusted_data, _trusted_domains, _certified_facebook_pages, _trusted_suffixes
+    global _cameroon_keywords, _government_tlds, _official_presidential_domains
+    global _tier1_news_agencies, _tier1_african_news
     
     _trusted_data = _load_config()
     _trusted_domains = set(_trusted_data.get('domains', []))
@@ -59,10 +66,21 @@ def reload_config() -> None:
         # Normalize: strip leading dot for consistency
         _trusted_suffixes.add(suffix.lower().lstrip('.'))
     
+    _cameroon_keywords = set(_trusted_data.get('cameroon_keywords', []))
+    _government_tlds = set(_trusted_data.get('government_tlds', []))
+    _official_presidential_domains = set(_trusted_data.get('official_presidential_domains', []))
+    _tier1_news_agencies = set(_trusted_data.get('tier1_news_agencies', []))
+    _tier1_african_news = set(_trusted_data.get('tier1_african_news', []))
+    
     logger.info(
         f"Loaded {len(_trusted_domains)} trusted domains, "
         f"{len(_certified_facebook_pages)} certified Facebook pages, "
-        f"{len(_trusted_suffixes)} trusted suffixes"
+        f"{len(_trusted_suffixes)} trusted suffixes, "
+        f"{len(_cameroon_keywords)} Cameroon keywords, "
+        f"{len(_government_tlds)} government TLDs, "
+        f"{len(_official_presidential_domains)} official presidential domains, "
+        f"{len(_tier1_news_agencies)} tier-1 news agencies, "
+        f"{len(_tier1_african_news)} tier-1 African news outlets"
     )
 
 
@@ -83,6 +101,31 @@ def get_certified_facebook_pages() -> set[str]:
 def get_trusted_suffixes() -> set[str]:
     """Return the current set of trusted suffixes (e.g., 'org', 'gov', 'edu')."""
     return _trusted_suffixes
+
+
+def get_cameroon_keywords() -> set[str]:
+    """Return the current set of Cameroon-related keywords."""
+    return _cameroon_keywords
+
+
+def get_government_tlds() -> set[str]:
+    """Return the current set of government TLDs (e.g., '.gov', '.gov.cm')."""
+    return _government_tlds
+
+
+def get_official_presidential_domains() -> set[str]:
+    """Return the current set of official presidential/government domains."""
+    return _official_presidential_domains
+
+
+def get_tier1_news_agencies() -> set[str]:
+    """Return the current set of tier-1 international news agency domains."""
+    return _tier1_news_agencies
+
+
+def get_tier1_african_news() -> set[str]:
+    """Return the current set of tier-1 African news outlet domains."""
+    return _tier1_african_news
 
 
 def has_trusted_suffix(domain: Optional[str]) -> bool:
@@ -137,6 +180,94 @@ def is_trusted_domain(domain: Optional[str]) -> bool:
             return True
     
     return False
+
+
+def has_cameroon_keyword(text: Optional[str]) -> bool:
+    """
+    Check if text contains any Cameroon-related keyword.
+    
+    Args:
+        text: Text to search (e.g., snippet, title)
+    
+    Returns:
+        True if any Cameroon keyword is found in the text
+    """
+    if not text:
+        return False
+    
+    text_lower = text.lower()
+    for keyword in _cameroon_keywords:
+        if keyword in text_lower:
+            return True
+    return False
+
+
+def has_government_tld(domain: Optional[str]) -> bool:
+    """
+    Check if a domain ends with a government TLD.
+    
+    Args:
+        domain: Domain string (e.g., 'example.gov', 'example.gov.cm')
+    
+    Returns:
+        True if the domain ends with any government TLD
+    """
+    if not domain:
+        return False
+    
+    domain_lower = domain.lower()
+    for tld in _government_tlds:
+        if domain_lower.endswith(tld):
+            return True
+    return False
+
+
+def is_official_presidential_domain(domain: Optional[str]) -> bool:
+    """
+    Check if a domain is an official presidential or government domain.
+    
+    Args:
+        domain: Domain string (e.g., 'prc.cm', 'whitehouse.gov')
+    
+    Returns:
+        True if the domain is in the official presidential domains set
+    """
+    if not domain:
+        return False
+    
+    return domain.lower() in _official_presidential_domains
+
+
+def is_tier1_news_agency(domain: Optional[str]) -> bool:
+    """
+    Check if a domain is a tier-1 international news agency.
+    
+    Args:
+        domain: Domain string (e.g., 'reuters.com', 'apnews.com')
+    
+    Returns:
+        True if the domain is in the tier-1 news agencies set
+    """
+    if not domain:
+        return False
+    
+    return domain.lower() in _tier1_news_agencies
+
+
+def is_tier1_african_news(domain: Optional[str]) -> bool:
+    """
+    Check if a domain is a tier-1 African news outlet.
+    
+    Args:
+        domain: Domain string (e.g., 'jeuneafrique.com', 'crtv.cm')
+    
+    Returns:
+        True if the domain is in the tier-1 African news set
+    """
+    if not domain:
+        return False
+    
+    return domain.lower() in _tier1_african_news
 
 
 def extract_facebook_page_username(url: Optional[str]) -> Optional[str]:

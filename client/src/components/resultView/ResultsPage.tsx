@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Cookies from "js-cookie";
 import HistoryBlock from "@/components/HistoryBlock";
@@ -116,6 +116,15 @@ export default function ResultsPage({
   >([]);
   const [researchProgress, setResearchProgress] = useState("");
   const [researchProgressStep, setResearchProgressStep] = useState("");
+
+  // Sync internal state when the prop changes (e.g. user selects a different history item)
+  useEffect(() => {
+    setResults(initialResults);
+    setViewMode("original");
+    setResearchSseLog([]);
+    setResearchProgress("");
+    setResearchProgressStep("");
+  }, [initialResults]);
 
   // ref for the right-hand column so we can measure its left offset for the fixed footer
   const rightColRef = useRef<HTMLDivElement>(null);

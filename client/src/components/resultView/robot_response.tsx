@@ -151,14 +151,14 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
                 >
                   ← Back to results
                 </button>
-              ) : (
+              ) : hasResearch && onViewMore ? (
                 <button
                   className="text-sm font-medium text-blue-600 hover:underline"
                   onClick={onViewMore}
                 >
-                  {hasResearch ? "View research report →" : "View more →"}
+                  View research report →
                 </button>
-              )}
+              ) : null}
             </div>
 
             {/* AI attribution footer */}

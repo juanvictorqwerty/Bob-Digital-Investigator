@@ -2,7 +2,7 @@
 
 import { BackGroundColor } from "@/colors/Colors";
 import UploadCard from "@/components/UploadCard";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 import HistoryBlock from "@/components/HistoryBlock";
@@ -20,6 +20,10 @@ export default function Home() {
   const [historyImageUrl, setHistoryImageUrl] = useState<string>("");
   const [sseLog, setSseLog] = useState<Array<{event: string; data: any; timestamp: string}>>([]);
   const [showProcessingAnimation, setShowProcessingAnimation] = useState(false);
+  const [historyViewMode, setHistoryViewMode] = useState<"original" | "research-loading" | "research-results">("original");
+  const [researchSseLog, setResearchSseLog] = useState<Array<{event: string; data: any; timestamp: Date}>>([]);
+  const [researchProgress, setResearchProgress] = useState("");
+  const [researchProgressStep, setResearchProgressStep] = useState("");
 
   const handleMediaSelect = (file: File | null) => {
     setSelectedFile(file);
@@ -33,7 +37,155 @@ export default function Home() {
     setHistoryResults(results);
     setHistoryAlias(alias);
     setHistoryImageUrl(imageUrl);
+    setHistoryViewMode("original");
   };
+
+  // Poll research progress via SSE (for history view)
+  const pollResearchProgress = useCallback(async (taskId: string, token: string): Promise<any> => {
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/discover/progress/${taskId}/`,
+      {
+        headers: {
+          "Authorization": `Token ${token}`,
+          "Accept": "text/event-stream",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`SSE connection failed: ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    return new Promise((resolve, reject) => {
+      const read = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop() ?? "";
+
+            for (const block of parts) {
+              const eventMatch = block.match(/^event: (.+)$/m);
+              const dataMatch = block.match(/^data: (.+)$/m);
+              if (!dataMatch) continue;
+
+              const event = eventMatch?.[1]?.trim() ?? "message";
+              const data = JSON.parse(dataMatch[1]);
+
+              setResearchSseLog((prev) => [...prev, { event, data, timestamp: new Date() }]);
+
+              if (event === "progress") {
+                setResearchProgress(data.message);
+                setResearchProgressStep(data.step);
+              } else if (event === "queued") {
+                setResearchProgress(data.message);
+                setResearchProgressStep("queued");
+              } else if (event === "done") {
+                reader.cancel();
+                resolve(data);
+                return;
+              } else if (event === "error") {
+                reader.cancel();
+                reject(new Error(data.error));
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      read();
+    });
+  }, []);
+
+  // Handle "View more" click for history view
+  const handleHistoryViewMore = useCallback(async () => {
+    const robot = historyResults?.robot_analysis;
+    if (!robot) return;
+
+    // If research already exists, just show it
+    if (robot.research_report && robot.research_report.summary) {
+      setHistoryViewMode("research-results");
+      return;
+    }
+
+    // If no analysis_id, can't trigger research
+    if (!robot.id) {
+      console.error("No analysis_id available for history");
+      return;
+    }
+
+    setHistoryViewMode("research-loading");
+    setResearchSseLog([]);
+    setResearchProgress("Starting research...");
+    setResearchProgressStep("loading");
+
+    const token = Cookies.get("token");
+    if (!token) {
+      setHistoryViewMode("original");
+      return;
+    }
+
+    try {
+      const checkResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/discover/generate/`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Token ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ analysis_id: robot.id }),
+        }
+      );
+
+      if (!checkResponse.ok) {
+        throw new Error(`Request failed: ${checkResponse.status}`);
+      }
+
+      const checkData = await checkResponse.json();
+
+      if (checkData.status === "already_exists") {
+        const updatedResults = { ...historyResults };
+        if (updatedResults.robot_analysis) {
+          updatedResults.robot_analysis.research_report = checkData.research_report;
+          updatedResults.robot_analysis.research_queries = checkData.research_queries;
+        }
+        setHistoryResults(updatedResults);
+        setHistoryViewMode("research-results");
+        return;
+      }
+
+      const taskId = checkData.task_id;
+      const result = await pollResearchProgress(taskId, token);
+
+      const updatedResults = { ...historyResults };
+      if (updatedResults.robot_analysis) {
+        updatedResults.robot_analysis.research_report = result.research_report;
+        updatedResults.robot_analysis.research_queries = result.research_queries;
+      }
+      setHistoryResults(updatedResults);
+      setHistoryViewMode("research-results");
+
+    } catch (error) {
+      console.error("Research generation failed:", error);
+      setHistoryViewMode("original");
+    }
+  }, [historyResults, pollResearchProgress]);
+
+  // Handle "Back to results" for history view
+  const handleHistoryBackToResults = useCallback(() => {
+    setHistoryViewMode("original");
+  }, []);
 
   const addSseLog = (event: string, data: any) => {
     const entry = { event, data, timestamp: new Date().toISOString() };
@@ -236,6 +388,9 @@ export default function Home() {
                         setHistoryAlias("");
                         setHistoryImageUrl("");
                       }}
+                      viewMode={historyViewMode}
+                      onViewMore={handleHistoryViewMore}
+                      onBackToResults={handleHistoryBackToResults}
                     />
                   </div>
             </>

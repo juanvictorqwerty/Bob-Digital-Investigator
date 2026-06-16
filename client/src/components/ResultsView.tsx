@@ -1,5 +1,7 @@
 "use client";
 
+import ResearchView from "./resultView/ResearchView";
+
 interface SearchResult {
   page_url: string;
   image_url: string;
@@ -28,12 +30,44 @@ interface Statistics {
   trusted_domains: number;
 }
 
+interface ResearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+  domain: string;
+}
+
+interface ResearchImage {
+  thumbnail_url: string;
+  source_url: string;
+  title: string;
+}
+
+interface ResearchVideo {
+  url: string;
+  thumbnail_url: string;
+  title: string;
+  source: string;
+  duration?: string;
+}
+
+interface ResearchReport {
+  summary: string;
+  key_findings: string[];
+  sources: ResearchSource[];
+  images: ResearchImage[];
+  videos: ResearchVideo[];
+}
+
 interface RobotAnalysisData {
+  id?: string;
   verdict: "real" | "fake" | "suspicious" | "unconfirmed";
   confidence: number;
   short_summary: string;
   explanation: string;
   key_evidence: string[];
+  research_queries?: string[];
+  research_report?: ResearchReport;
   llm_used: boolean;
 }
 
@@ -52,6 +86,12 @@ interface ResultsViewProps {
   alias: string;
   imageUrl: string;
   onBack: () => void;
+  viewMode?: "original" | "research-loading" | "research-results";
+  onViewMore?: () => void;
+  onBackToResults?: () => void;
+  researchSseLog?: Array<{event: string; data: any; timestamp: Date}>;
+  researchProgress?: string;
+  researchProgressStep?: string;
 }
 
 function domainIcon(domain: string): string {
@@ -82,7 +122,7 @@ const VERDICT_CONFIG: Record<string, { icon: string; label: string; bg: string; 
   unconfirmed: { icon: "❓", label: "Unconfirmed",   bg: "bg-gray-50",    border: "border-gray-300",   text: "text-gray-700" },
 };
 
-export default function ResultsView({ results, alias, imageUrl, onBack }: ResultsViewProps) {
+export default function ResultsView({ results, alias, imageUrl, onBack, viewMode = "original", onViewMore, onBackToResults }: ResultsViewProps) {
   const items: SearchResult[] = results.normalized_results ?? [];
   const stats = results.statistics ?? {
     total_sources: 0,
@@ -113,6 +153,38 @@ export default function ResultsView({ results, alias, imageUrl, onBack }: Result
     if (score >= 0.6) return "bg-emerald-500";
     if (score >= 0.4) return "bg-amber-500";
     return "bg-red-500";
+  }
+
+  const hasResearch = robot?.research_report && robot.research_report.summary;
+
+  // Research view mode rendering
+  if (viewMode === "research-results" && robot?.research_report) {
+    return (
+      <div className="w-full max-w-6xl mx-auto px-4 py-8">
+        {/* Import ResearchView dynamically */}
+        <ResearchView report={robot.research_report} verdict={robot.verdict} />
+        <div className="mt-8 text-center">
+          <button
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 hover:underline"
+            onClick={onBackToResults}
+          >
+            ← Back to results
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (viewMode === "research-loading") {
+    return (
+      <div className="w-full max-w-6xl mx-auto px-4 py-8 text-center">
+        <div className="py-16">
+          <div className="text-5xl mb-4 animate-pulse">🔍</div>
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Generating Research Report…</h2>
+          <p className="text-sm text-gray-500">Searching for additional sources, images, and videos</p>
+        </div>
+      </div>
+    );
   }
 
   return (

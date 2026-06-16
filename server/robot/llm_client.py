@@ -390,27 +390,61 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
     confidence = parsed.get("confidence", 0.0)
     explanation = parsed.get("explanation", "")
 
-    # Fix 1: Unconfirmed with high confidence is a logical error
-    if verdict == "unconfirmed" and confidence >= 0.65:
+    # Fix 1: Unconfirmed with ANY confidence >= 0.50 is a logical error
+    # The LLM should never say "unconfirmed" when it has enough confidence to
+    # make a determination. At 50%+ confidence, there IS evidence — use it.
+    if verdict == "unconfirmed" and confidence >= 0.50:
         logger.warning(f"Overcautious verdict detected: unconfirmed at {confidence} confidence. Upgrading to 'likely'.")
         parsed["verdict"] = "likely"
         parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'unconfirmed' because confidence was high but verdict was too cautious.]"
 
     # Fix 2: If prompt mentions official government sources and confidence is high
-    if "✓ Official government/presidential source present" in prompt and confidence >= 0.70:
+    if "✓ Official government/presidential source present" in prompt and confidence >= 0.65:
         if verdict in ("unconfirmed", "suspicious"):
             logger.warning(f"Overcautious verdict detected: {verdict} despite official govt source. Upgrading to 'likely'.")
             parsed["verdict"] = "likely"
             parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded because an official government source with specific details was present.]"
 
     # Fix 3: If both govt + tier1 news present, should be at least "likely"
-    if ("✓ Official government/presidential source present" in prompt and 
+    if ("✓ Official government/presidential source present" in prompt and
         "✓ Tier-1 international news agency present" in prompt and
-        confidence >= 0.75):
+        confidence >= 0.70):
         if verdict in ("unconfirmed", "suspicious", "likely"):
             logger.info(f"Strong corroboration detected (govt + tier1). Upgrading verdict to 'real'.")
             parsed["verdict"] = "real"
             parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded to 'real' due to corroboration between official government source and tier-1 news agency.]"
+
+    # Fix 4: If the explanation itself says the claim is "supported" or "confirmed"
+    # by sources, but the verdict is still "unconfirmed", upgrade it.
+    # This catches cases where the LLM contradicts its own reasoning.
+    explanation_lower = explanation.lower()
+    if verdict in ("unconfirmed", "suspicious"):
+        positive_signals = [
+            "supported by", "confirmed by", "corroborated by",
+            "indicates that", "evidence suggests", "credible source",
+            "recognized local news", "adds weight", "plausible",
+            "consistent with", "multiple sources",
+        ]
+        positive_count = sum(1 for phrase in positive_signals if phrase in explanation_lower)
+        if positive_count >= 2 and confidence >= 0.55:
+            new_verdict = "likely" if confidence < 0.80 else "real"
+            logger.warning(
+                f"Self-contradicting verdict detected: LLM explanation has {positive_count} "
+                f"positive signals but verdict is '{verdict}'. Upgrading to '{new_verdict}'."
+            )
+            parsed["verdict"] = new_verdict
+            parsed["explanation"] = explanation + (
+                f" [SYSTEM NOTE: Verdict upgraded from '{verdict}' to '{new_verdict}' because "
+                f"the explanation contained {positive_count} positive evidence indicators "
+                f"contradicting the cautious verdict.]"
+            )
+
+    # Fix 5: Suspicious with high confidence should be "likely" — if you're
+    # confident enough, commit to a direction rather than hedging.
+    if verdict == "suspicious" and confidence >= 0.70:
+        logger.warning(f"High-confidence suspicious detected at {confidence}. Upgrading to 'likely'.")
+        parsed["verdict"] = "likely"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'suspicious' to 'likely' because confidence was high enough to make a determination.]"
 
     return parsed
 

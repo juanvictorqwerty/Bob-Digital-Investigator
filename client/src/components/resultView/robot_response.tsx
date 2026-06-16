@@ -82,8 +82,6 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
           );
         }
 
-        const hasResearch = robot.research_report && robot.research_report.summary;
-
         return (
           <div className="mb-8 pt-8 border-t-2 border-gray-200">
             {/* Section heading */}
@@ -151,7 +149,7 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
                 >
                   ← Back to results
                 </button>
-              ) : hasResearch && onViewMore ? (
+              ) : onViewMore ? (
                 <button
                   className="text-sm font-medium text-blue-600 hover:underline"
                   onClick={onViewMore}

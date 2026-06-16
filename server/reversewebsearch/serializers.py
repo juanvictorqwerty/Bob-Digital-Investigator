@@ -89,13 +89,16 @@ class WebsearchResultDetailSerializer(serializers.ModelSerializer):
 
     def get_results(self, obj):
         results = obj.results or {}
-        # Check if there's a RobotAnalysis with research data
+        # Check if there's a RobotAnalysis record
         robot_analysis = getattr(obj, 'robot_analysis', None)
-        if robot_analysis and robot_analysis.research_report:
+        if robot_analysis:
             if 'robot_analysis' in results and isinstance(results['robot_analysis'], dict):
-                results['robot_analysis']['research_report'] = robot_analysis.research_report
-                results['robot_analysis']['research_queries'] = robot_analysis.research_queries
+                # Always inject the analysis id so the frontend can trigger research
                 results['robot_analysis']['id'] = str(robot_analysis.id)
+                # Only inject research data when it exists
+                if robot_analysis.research_report:
+                    results['robot_analysis']['research_report'] = robot_analysis.research_report
+                    results['robot_analysis']['research_queries'] = robot_analysis.research_queries
         return results
 
 

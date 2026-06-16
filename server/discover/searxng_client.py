@@ -41,13 +41,6 @@ def _search(query, categories=None, page=1, language='auto'):
         return None
 
     base_url = _get_base_url()
-    cache_key = f"searxng:{':'.join(categories or ['general'])}:{query}:{page}"
-
-    # Check cache
-    cached = cache.get(cache_key)
-    if cached is not None:
-        logger.debug(f"SearXNG cache hit: {query[:50]} ({':'.join(categories or ['general'])})")
-        return cached
 
     params = {
         'q': query.strip(),
@@ -71,8 +64,6 @@ def _search(query, categories=None, page=1, language='auto'):
             'categories': categories or ['general'],
         }
 
-        # Cache the result
-        cache.set(cache_key, result, timeout=_CACHE_TTL)
         logger.info(
             f"SearXNG search: '{query[:50]}' ({':'.join(categories or ['general'])}) "
             f"→ {len(result['results'])} results"

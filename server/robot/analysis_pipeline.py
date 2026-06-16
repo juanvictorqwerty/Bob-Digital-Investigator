@@ -119,6 +119,7 @@ def run_robot_analysis(websearch_result, processed_data):
                 "llm_prompt": prompt,
             }
         )
+        verdict_dict["id"] = str(analysis_obj.id)
         verdict_dict["analysis_id"] = str(analysis_obj.id)
         logger.info(f"RobotAnalysis saved: {verdict_dict['verdict']} @ {verdict_dict['confidence']:.0%}")
     except Exception as e:

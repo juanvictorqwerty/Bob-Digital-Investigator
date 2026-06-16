@@ -9,6 +9,8 @@ import time
 import logging
 from django.http import JsonResponse, StreamingHttpResponse
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import TokenAuthentication
 from celery.result import AsyncResult
@@ -43,6 +45,7 @@ def _resolve_user_from_token(request):
     return token_obj.user, None
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class GenerateResearchView(View):
     """
     POST endpoint to trigger on-demand research generation for a RobotAnalysis.

@@ -397,11 +397,11 @@ def score_result(result: dict, engine_counts: dict, user_query: str = "") -> int
     Without trust/meta  : 4–9 pts  (still useful for ranking)
     """
     score = 0
-    page_url   = result.get('page_url', '').lower()
-    image_url  = result.get('image_url', '').lower()
-    snippet    = result.get('snippet', '').lower()
-    title      = result.get('title', '').lower()
-    domain     = result.get('domain', '').lower()
+    page_url   = (result.get('page_url') or '').lower()
+    image_url  = (result.get('image_url') or '').lower()
+    snippet    = (result.get('snippet') or '').lower()
+    title      = (result.get('title') or '').lower()
+    domain     = (result.get('domain') or '').lower()
 
     # ── Tier 1: Universal signals ─────────────────────────────────────────────
     engine_count = engine_counts.get(page_url, 0)
@@ -552,7 +552,7 @@ def build_timeline(results):
     for result in results:
         # Skip miniatures and sublinks — they should not appear in the timeline
         if is_miniature_or_sublink(result):
-            logger.debug(f"Skipping miniature/sublink in timeline: {result.get('image_url', '')[:80]}")
+            logger.debug(f"Skipping miniature/sublink in timeline: {(result.get('image_url') or '')[:80]}")
             continue
 
         publish_date = result.get('publish_date')

@@ -18,6 +18,8 @@ export default function Home() {
   const [historyResults, setHistoryResults] = useState<any>(null);
   const [historyAlias, setHistoryAlias] = useState<string>("");
   const [historyImageUrl, setHistoryImageUrl] = useState<string>("");
+  const [sseLog, setSseLog] = useState<Array<{event: string; data: any; timestamp: string}>>([]);
+  const [showProcessingAnimation, setShowProcessingAnimation] = useState(false);
 
   const handleMediaSelect = (file: File | null) => {
     setSelectedFile(file);
@@ -31,6 +33,16 @@ export default function Home() {
     setHistoryResults(results);
     setHistoryAlias(alias);
     setHistoryImageUrl(imageUrl);
+  };
+
+  const addSseLog = (event: string, data: any) => {
+    const entry = { event, data, timestamp: new Date().toISOString() };
+    setSseLog((prev) => {
+      const updated = [...prev, entry];
+      // Keep sessionStorage in sync for the result page
+      sessionStorage.setItem("sseLog", JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const pollProgress = async (taskId: string, token: string): Promise<any> => {
@@ -70,6 +82,9 @@ export default function Home() {
 
               const event = eventMatch?.[1]?.trim() ?? "message";
               const data = JSON.parse(dataMatch[1]);
+
+              // Log every SSE event for real-time display on results page
+              addSseLog(event, data);
 
               if (event === "progress") {
                 setProgress(data.message);

@@ -22,4 +22,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('authentication.urls')),
     path('api/', include('reversewebsearch.urls')),
+    path('api/', include('discover.urls')),
 ]

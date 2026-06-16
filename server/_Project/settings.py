@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'authentication',
     'reversewebsearch',
     'robot',
+    'discover',
 ]
 
 MIDDLEWARE = [
@@ -201,6 +202,8 @@ OPENROUTER_API_KEY = env('OPENROUTER_API_KEY', default='')
 RAPIDAPI_KEY = env('RAPIDAPI_KEY', default='')
 # OpenWebNinja (Reverse Image Search) Configuration
 REVERSE_IMAGE_API_KEY = env('REVERSE_IMAGE', default='')
+# SearXNG (Self-hosted Metasearch Engine) Configuration
+SEARXNG_BASE_URL = env('SEARXNG_BASE_URL', default='http://localhost:8888')
 
 # Celery Configuration
 CELERY_BROKER_URL = "redis://localhost:6379/0"

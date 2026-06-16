@@ -7,6 +7,7 @@ class RobotAnalysisSerializer(serializers.ModelSerializer):
     class Meta:
         model = RobotAnalysis
         fields = [
-            'id', 'verdict', 'confidence_score', 'explanation',
-            'key_evidence', 'created_at'
+            'id', 'verdict', 'confidence_score', 'short_summary',
+            'explanation', 'key_evidence', 'research_queries',
+            'research_report', 'created_at'
         ]

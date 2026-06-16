@@ -119,17 +119,10 @@ def get_cached_or_fetch(cache_key, fetch_func, ttl=86400):
 def fetch_image_metadata(url):
     """
     Fetch image metadata (file size, dimensions) using SERP API image search.
-    Results are cached for 24 hours since metadata rarely changes.
     
     Returns a dict with file_size_bytes and dimensions.
     """
     logger.info(f"Fetching metadata for image URL: {url}")
-    
-    cache_key = f"metadata:{url}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        logger.debug(f"Metadata cache hit: {url[:60]}")
-        return cached
 
     try:
         from serpapi import GoogleSearch
@@ -183,7 +176,6 @@ def fetch_image_metadata(url):
                         logger.warning(f"Error parsing dimensions for {url}: {str(e)}")
 
         logger.info(f"Successfully fetched metadata for {url}: {metadata}")
-        cache.set(cache_key, metadata, timeout=getattr(settings, 'CACHE_METADATA_TTL', 86400))
         return metadata
 
     except Exception as e:
@@ -197,7 +189,6 @@ def fetch_image_metadata(url):
 def crawl_image(url, attempt=1, max_retries=2):
     """
     Crawl the actual page URL to extract metadata and readable content.
-    Results are cached for 7 days since crawled content changes infrequently.
     
     Retries up to `max_retries` times on transient failures (timeout,
     connection error, server 5xx). Does NOT retry on paywalls, 403s,
@@ -230,14 +221,6 @@ def crawl_image(url, attempt=1, max_retries=2):
             attempts: Number of attempts made
     """
     logger.info(f"Crawling page URL: {url} (attempt {attempt}/{max_retries})")
-    
-    # Check cache on first attempt
-    if attempt == 1:
-        cache_key = f"crawl:{url}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            logger.debug(f"Crawl cache hit: {url[:60]}")
-            return cached
 
     if not url:
         logger.warning("No URL provided for crawling")
@@ -323,9 +306,6 @@ def crawl_image(url, attempt=1, max_retries=2):
                 "paywall_detected": paywall_detected,
                 "attempts": attempt,
             }
-            # Cache failures too (shorter TTL)
-            if attempt == 1:
-                cache.set(cache_key, result, timeout=3600)
             return result
 
         logger.info(
@@ -349,11 +329,7 @@ def crawl_image(url, attempt=1, max_retries=2):
             "paywall_detected": paywall_detected,
             "attempts": attempt,
         }
-        
-        # Cache successful crawls for 7 days
-        if attempt == 1:
-            cache.set(cache_key, result, timeout=getattr(settings, 'CACHE_CRAWL_TTL', 604800))
-        
+
         return result
 
     except requests.exceptions.Timeout:

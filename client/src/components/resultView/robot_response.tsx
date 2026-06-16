@@ -1,18 +1,53 @@
+interface ResearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+  domain: string;
+}
+
+interface ResearchImage {
+  thumbnail_url: string;
+  source_url: string;
+  title: string;
+}
+
+interface ResearchVideo {
+  url: string;
+  thumbnail_url: string;
+  title: string;
+  source: string;
+  duration?: string;
+}
+
+interface ResearchReport {
+  summary: string;
+  key_findings: string[];
+  sources: ResearchSource[];
+  images: ResearchImage[];
+  videos: ResearchVideo[];
+}
+
 interface RobotAnalysisData {
+  id?: string;
   verdict: "real" | "fake" | "suspicious" | "unconfirmed";
   confidence: number;
   short_summary: string;
   explanation: string;
   key_evidence: string[];
+  research_queries?: string[];
+  research_report?: ResearchReport;
   llm_used: boolean;
 }
 
 interface RobotResponseProps {
   robot: RobotAnalysisData | null;
   compact?: boolean;
+  onViewMore?: () => void;
+  onBackToResults?: () => void;
+  showResearch?: boolean;
 }
 
-export default function RobotResponse({ robot, compact = false }: RobotResponseProps) {
+export default function RobotResponse({ robot, compact = false, onViewMore, onBackToResults, showResearch = false }: RobotResponseProps) {
   return (
     <>
       {robot && (() => {
@@ -46,6 +81,8 @@ export default function RobotResponse({ robot, compact = false }: RobotResponseP
             </div>
           );
         }
+
+        const hasResearch = robot.research_report && robot.research_report.summary;
 
         return (
           <div className="mb-8 pt-8 border-t-2 border-gray-200">
@@ -103,6 +140,25 @@ export default function RobotResponse({ robot, compact = false }: RobotResponseP
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="mt-4 flex items-center gap-4">
+              {showResearch && onBackToResults ? (
+                <button
+                  className="text-sm font-medium text-gray-600 hover:text-gray-900 hover:underline flex items-center gap-1"
+                  onClick={onBackToResults}
+                >
+                  ← Back to results
+                </button>
+              ) : (
+                <button
+                  className="text-sm font-medium text-blue-600 hover:underline"
+                  onClick={onViewMore}
+                >
+                  {hasResearch ? "View research report →" : "View more →"}
+                </button>
+              )}
             </div>
 
             {/* AI attribution footer */}

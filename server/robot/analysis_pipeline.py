@@ -107,7 +107,7 @@ def run_robot_analysis(websearch_result, processed_data):
 
     # Step 5: Save to DB
     try:
-        RobotAnalysis.objects.update_or_create(
+        analysis_obj, _created = RobotAnalysis.objects.update_or_create(
             websearch_result=websearch_result,
             defaults={
                 "verdict": verdict_dict["verdict"],
@@ -119,6 +119,7 @@ def run_robot_analysis(websearch_result, processed_data):
                 "llm_prompt": prompt,
             }
         )
+        verdict_dict["analysis_id"] = str(analysis_obj.id)
         logger.info(f"RobotAnalysis saved: {verdict_dict['verdict']} @ {verdict_dict['confidence']:.0%}")
     except Exception as e:
         logger.error(f"Failed to save RobotAnalysis: {str(e)}")

@@ -263,8 +263,24 @@ export default function ResultsPage({
         }
       );
 
-      if (!checkResponse.ok)
-        throw new Error(`Request failed: ${checkResponse.status}`);
+      if (!checkResponse.ok) {
+        // Try to get the response body as text first (may be HTML or JSON)
+        let responseBody = "";
+        try {
+          responseBody = await checkResponse.text();
+        } catch {
+          responseBody = "(unable to read response body)";
+        }
+        console.error("Discover/generate request failed:", {
+          status: checkResponse.status,
+          statusText: checkResponse.statusText,
+          body: responseBody.substring(0, 500),
+          headers: Object.fromEntries(checkResponse.headers.entries()),
+        });
+        throw new Error(
+          `Request failed: ${checkResponse.status} - ${responseBody.substring(0, 200)}`
+        );
+      }
 
       const checkData = await checkResponse.json();
 

@@ -25,6 +25,14 @@ class RobotAnalysis(models.Model):
     )
     explanation = models.TextField(help_text="Detailed reasoning from the LLM")
     key_evidence = models.JSONField(default=list, blank=True, help_text="List of key evidence items")
+    research_queries = models.JSONField(
+        default=list, blank=True,
+        help_text="List of SearXNG search queries generated for this analysis"
+    )
+    research_report = models.JSONField(
+        default=dict, blank=True,
+        help_text="Research report with summary, sources, images, and videos from SearXNG"
+    )
     llm_raw_response = models.JSONField(default=dict, blank=True, null=True)
     llm_prompt = models.TextField(blank=True, default="")
 

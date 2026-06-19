@@ -1,0 +1,80 @@
+use_default_settings: true
+
+general:
+  instance_name: "Bob Digital Investigator"
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "bob-digital-investigator-searxng-secret-key-change-me"
+  limiter: false
+  image_proxy: true
+
+ui:
+  default_theme: simple
+  static_use_hash: true
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: w
+    disabled: false
+
+  - name: youtube
+    engine: youtube
+    shortcut: yt
+    disabled: false
+
+  - name: google images
+    engine: google_images
+    shortcut: gi
+    disabled: false
+
+  - name: google videos
+    engine: google_videos
+    shortcut: gv
+    disabled: false
+
+  - name: bing images
+    engine: bing_images
+    shortcut: bi
+    disabled: false
+
+  - name: bing videos
+    engine: bing_videos
+    shortcut: bv
+    disabled: false
+
+  - name: duckduckgo images
+    engine: duckduckgo_images
+    shortcut: ddi
+    disabled: false
+
+  - name: duckduckgo videos
+    engine: duckduckgo_videos
+    shortcut: ddv
+    disabled: false

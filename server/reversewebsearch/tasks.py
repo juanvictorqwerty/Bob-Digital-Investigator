@@ -257,18 +257,9 @@ def _crawl_single_source(idx, result, target_url):
 def _perform_openwebninja_search(image_url):
     """
     Perform reverse image search using OpenWebNinja API.
-    Results are cached for 24 hours since the same image search
-    typically returns the same results.
     
     Returns list of results with engine field set to 'openwebninja'.
     """
-    # Check cache first
-    cache_key = f"openwebninja:{image_url}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        logger.info(f"OpenWebNinja cache hit for: {image_url[:60]}")
-        return cached
-
     api_key = settings.REVERSE_IMAGE_API_KEY
     if not api_key:
         logger.error("OpenWebNinja API key not configured (REVERSE_IMAGE)")
@@ -308,9 +299,6 @@ def _perform_openwebninja_search(image_url):
                 "image_metadata": None,
                 "extracted_text": ""
             })
-        
-        # Cache the results
-        cache.set(cache_key, formatted_results, timeout=getattr(settings, 'CACHE_EXTERNAL_API_TTL', 86400))
         
         return formatted_results
         

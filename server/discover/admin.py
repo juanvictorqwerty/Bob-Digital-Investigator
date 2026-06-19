@@ -28,7 +28,7 @@ original_get_urls = admin.site.get_urls
 
 
 def patched_get_urls(self):
-    urls = original_get_urls(self)
+    urls = original_get_urls()
     custom_urls = [
         path('metrics/backend-raw/',
              self.admin_view(metrics_backend_raw),

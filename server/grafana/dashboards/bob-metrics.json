@@ -1,0 +1,263 @@
+{
+  "title": "Bob Digital Investigator - Metrics Overview",
+  "uid": "bob-digital-investigator",
+  "version": 1,
+  "tags": ["bob", "django", "nextjs"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "panels": [
+    {
+      "title": "HTTP Requests - Backend (Django)",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(django_http_requests_total_by_method_total[5m])",
+          "legendFormat": "{{ method }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" }
+        }
+      },
+      "description": "HTTP request rate by method for the Django backend"
+    },
+    {
+      "title": "HTTP Requests - Frontend (Next.js)",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(nextjs_http_requests_total[5m])",
+          "legendFormat": "{{ route }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" }
+        }
+      },
+      "description": "HTTP request rate by route for the Next.js frontend"
+    },
+    {
+      "title": "Request Duration - Django Backend",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(django_http_requests_latency_seconds_bucket[5m])",
+          "legendFormat": "{{ le }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Request latency distribution for Django endpoints"
+    },
+    {
+      "title": "Request Duration - Next.js Frontend",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(nextjs_http_request_duration_seconds_bucket[5m])",
+          "legendFormat": "{{ le }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Request latency distribution for Next.js endpoints"
+    },
+    {
+      "title": "Active Users",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "nextjs_active_users",
+          "legendFormat": "Active Users",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 50, "color": "yellow" },
+              { "value": 100, "color": "red" }
+            ]
+          }
+        }
+      },
+      "description": "Number of active users on the frontend"
+    },
+    {
+      "title": "Process Memory - Django Backend",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 16 },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job='django-backend'}",
+          "legendFormat": "Memory",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 200000000, "color": "yellow" },
+              { "value": 500000000, "color": "red" }
+            ]
+          }
+        }
+      },
+      "description": "Resident memory of the Django process"
+    },
+    {
+      "title": "Process Memory - Next.js Frontend",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job='nextjs-frontend'}",
+          "legendFormat": "Memory",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 200000000, "color": "yellow" },
+              { "value": 500000000, "color": "red" }
+            ]
+          }
+        }
+      },
+      "description": "Resident memory of the Next.js process"
+    },
+    {
+      "title": "Python GC Collections (Django)",
+      "type": "graph",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(python_gc_collections_total[5m])",
+          "legendFormat": "{{ generation }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" }
+        }
+      },
+      "description": "Python garbage collection rate by generation"
+    },
+    {
+      "title": "HTTP Responses by Status - Django",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "targets": [
+        {
+          "expr": "sum by (status_code) (rate(django_http_responses_total_by_status_total[10m]))",
+          "legendFormat": "{{ status_code }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "options": {
+        "pieType": "donut",
+        "reduceOptions": { "values": false, "calcs": ["sum"] }
+      },
+      "description": "Distribution of HTTP response status codes from Django"
+    },
+    {
+      "title": "HTTP Responses by Status - Next.js",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(nextjs_http_requests_total[10m]))",
+          "legendFormat": "{{ status }}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "options": {
+        "pieType": "donut",
+        "reduceOptions": { "values": false, "calcs": ["sum"] }
+      },
+      "description": "Distribution of HTTP response status codes from Next.js"
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

@@ -83,28 +83,28 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
         }
 
         return (
-          <div className="mb-8 pt-8 border-t-2 border-gray-200">
+          <div className="mb-6 pt-6 border-t-2 border-gray-200">
             {/* Section heading */}
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-lg">🤖</span>
-              <h2 className="text-lg font-semibold text-gray-900">AI Analysis Conclusion</h2>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">🤖</span>
+              <h2 className="text-base font-semibold text-gray-900">AI Analysis Conclusion</h2>
               {!robot.llm_used && (
-                <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 font-medium">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 font-medium">
                   Rules-based
                 </span>
               )}
             </div>
 
             {/* Verdict card */}
-            <div className={`rounded-2xl border-2 ${cfg.border} ${cfg.bg} p-6 shadow-sm transition-all hover:shadow-md`}>
-              <div className="flex items-start gap-4">
-                <div className="text-4xl shrink-0">{cfg.icon}</div>
+            <div className={`rounded-xl border-2 ${cfg.border} ${cfg.bg} p-4 shadow-sm transition-all hover:shadow-md`}>
+              <div className="flex items-start gap-3">
+                <div className="text-3xl shrink-0">{cfg.icon}</div>
                 <div className="flex-1 min-w-0">
                   {/* Verdict badge + confidence */}
-                  <div className="flex items-center gap-3 flex-wrap mb-3">
-                    <span className={`text-lg font-bold ${cfg.text}`}>{cfg.label}</span>
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${cfg.bg} ${cfg.text} border ${cfg.border}`}>
-                      <span className={`w-2 h-2 rounded-full ${
+                  <div className="flex items-center gap-2 flex-wrap mb-2">
+                    <span className={`text-base font-bold ${cfg.text}`}>{cfg.label}</span>
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full ${cfg.bg} ${cfg.text} border ${cfg.border}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${
                         robot.confidence >= 0.8 ? "bg-green-500" :
                         robot.confidence >= 0.6 ? "bg-emerald-500" :
                         robot.confidence >= 0.4 ? "bg-amber-500" :
@@ -116,7 +116,7 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
 
                   {/* Short summary */}
                   {robot.short_summary && (
-                    <p className={`text-sm font-medium ${cfg.text} mb-2`}>{robot.short_summary}</p>
+                    <p className={`text-sm font-medium ${cfg.text} mb-1.5`}>{robot.short_summary}</p>
                   )}
 
                   {/* Explanation */}
@@ -124,9 +124,9 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
 
                   {/* Key evidence */}
                   {robot.key_evidence && robot.key_evidence.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-gray-200">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Key Evidence</p>
-                      <ul className="space-y-1.5">
+                    <div className="mt-3 pt-2 border-t border-gray-200">
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Key Evidence</p>
+                      <ul className="space-y-1">
                         {robot.key_evidence.map((ev: string, i: number) => (
                           <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
                             <span className="text-gray-400 mt-0.5 shrink-0">•</span>
@@ -141,7 +141,7 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
             </div>
 
             {/* Action buttons */}
-            <div className="mt-4 flex items-center gap-4">
+            <div className="mt-3 flex items-center gap-4">
               {showResearch && onBackToResults ? (
                 <button
                   className="text-sm font-medium text-gray-600 hover:text-gray-900 hover:underline flex items-center gap-1"
@@ -160,8 +160,8 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
             </div>
 
             {/* AI attribution footer */}
-            <div className="mt-4 text-center">
-              <p className="text-xs text-gray-400">
+            <div className="mt-3 text-center">
+              <p className="text-[10px] text-gray-400">
                 Analysis powered by AI · Results may contain errors. Verify critical information through official sources.
               </p>
             </div>

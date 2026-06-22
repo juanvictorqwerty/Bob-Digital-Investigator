@@ -8,13 +8,10 @@ FROM oven/bun:${BUN_VERSION} as base
 WORKDIR /usr/src/app
 
 ################################################################################
-# Create a stage for installing production dependecies.
+# Create a stage for installing production dependencies.
 FROM base as deps
 
 # Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.bun to speed up subsequent builds.
-# Leverage bind mounts to package.json and bun.lock to avoid having to copy them
-# into this layer.
 RUN --mount=type=bind,source=package.json,target=package.json \
     --mount=type=bind,source=bun.lock,target=bun.lock \
     --mount=type=cache,target=/root/.bun \
@@ -24,8 +21,7 @@ RUN --mount=type=bind,source=package.json,target=package.json \
 # Create a stage for building the application.
 FROM deps as build
 
-# Download additional development dependencies before building, as some projects require
-# "devDependencies" to be installed to build. If you don't need this, remove this step.
+# Download additional development dependencies before building.
 RUN --mount=type=bind,source=package.json,target=package.json \
     --mount=type=bind,source=bun.lock,target=bun.lock \
     --mount=type=cache,target=/root/.bun \
@@ -33,12 +29,16 @@ RUN --mount=type=bind,source=package.json,target=package.json \
 
 # Copy the rest of the source files into the image.
 COPY . .
+
+# Add environment variables
+ARG NEXT_PUBLIC_BACKEND_URL
+ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+
 # Run the build script.
 RUN bun run build
 
 ################################################################################
 # Create a new stage to run the application with minimal runtime dependencies
-# where the necessary files are copied from the build stage.
 FROM base as final
 
 # Use production environment by default.
@@ -53,7 +53,9 @@ COPY package.json .
 # Copy the production dependencies from the deps stage and also
 # the built application from the build stage into the image.
 COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY --from=build /usr/src/app/dist ./dist
+COPY --from=build /usr/src/app/.next ./.next
+COPY --from=build /usr/src/app/public ./public
+COPY --from=build /usr/src/app/next.config.ts ./next.config.ts
 
 # Expose the port that the application listens on.
 EXPOSE 3000

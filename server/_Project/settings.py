@@ -34,7 +34,7 @@ SECRET_KEY = 'django-insecure-6mo6bg)-!8e!l11p2!48@6b3-z@omyx+(2z06!2a2l%b@4as)2
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -142,7 +142,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
-
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 #Django-Rest-Framework
 
@@ -197,27 +197,29 @@ STORAGES = {
 CLOUDINARY_CLOUD_NAME = env('CLOUDINARY_CLOUD_NAME', default='')
 CLOUDINARY_API_KEY = env('CLOUDINARY_API_KEY', default='')
 CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
-# SerpApi Configuration
-SERPAPI_KEY = env('SERPAPI_KEY', default='')
+
 # OpenRouter Configuration
 OPENROUTER_API_KEY = env('OPENROUTER_API_KEY', default='')
 # RapidAPI Configuration
-RAPIDAPI_KEY = env('RAPIDAPI_KEY', default='')
-# OpenWebNinja (Reverse Image Search) Configuration
+
 REVERSE_IMAGE_API_KEY = env('REVERSE_IMAGE', default='')
 # SearXNG (Self-hosted Metasearch Engine) Configuration
 SEARXNG_BASE_URL = env('SEARXNG_BASE_URL', default='http://localhost:8888')
 
 # Celery Configuration
-CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+REDIS_HOST = env('REDIS_HOST', default='localhost')
+REDIS_PORT = env('REDIS_PORT', default='6379')
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+
+CELERY_BROKER_URL = f"{REDIS_URL}/0"
+CELERY_RESULT_BACKEND = f"{REDIS_URL}/0"
 CELERY_TASK_TRACK_STARTED = True
 
 # Redis Cache Configuration
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://localhost:6379/1",
+        "LOCATION": f"{REDIS_URL}/1",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
             "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",

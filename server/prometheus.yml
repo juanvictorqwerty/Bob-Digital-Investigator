@@ -1,4 +1,4 @@
-# Prometheus configuration
+# Prometheus configuration for Bob Digital Investigator
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -9,10 +9,7 @@ scrape_configs:
     metrics_path: '/metrics'
     static_configs:
       - targets:
-          # When running both Django and Prometheus in Docker Compose:
-          - 'server:8000'
-          # For local development (Django on host, Prometheus in Docker):
-          - 'host.docker.internal:8000'
+          - 'django:8000'
         labels:
           service: 'backend'
           app: 'bob-digital-investigator'
@@ -22,8 +19,7 @@ scrape_configs:
     metrics_path: '/api/metrics'
     static_configs:
       - targets:
-          # For local development (Next.js on host, Prometheus in Docker):
-          - 'host.docker.internal:3000'
+          - 'client:3000'
         labels:
           service: 'frontend'
           app: 'bob-digital-investigator'

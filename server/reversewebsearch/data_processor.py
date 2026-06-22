@@ -613,6 +613,7 @@ def compute_statistics(results):
     trusted_domain_count = 0
     govt_source_count = 0
     tier1_news_count = 0
+    credible_local_news_count = 0
 
     for r in results:
         domain = r.get('domain')
@@ -625,6 +626,9 @@ def compute_statistics(results):
                 govt_source_count += 1
             if _is_tier1_news_source(domain):
                 tier1_news_count += 1
+            # Count credible local news outlets (tier-1 African news)
+            if is_tier1_african_news(domain):
+                credible_local_news_count += 1
 
     # Count certified Facebook pages
     certified_fb_count = sum(1 for r in results if is_certified_facebook_page(r.get('page_url')))
@@ -638,6 +642,7 @@ def compute_statistics(results):
         'certified_facebook_pages': certified_fb_count,
         'government_sources': govt_source_count,
         'tier1_news_sources': tier1_news_count,
+        'credible_local_news_sources': credible_local_news_count,
     }
 
 

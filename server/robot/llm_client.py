@@ -58,14 +58,14 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
         title = c.get("title", "No title")
         engine = c.get("engine", "unknown")
 
-        # Identify authoritative source type for the prompt
-        source_tier = "standard"
+        # Identify source type for the prompt — simplified credibility markers
+        source_type = "other"
         if domain in {'prc.cm', 'presidence.cm', 'kremlin.ru', 'elysee.fr', 'whitehouse.gov', 'state.gov'}:
-            source_tier = "OFFICIAL_GOVERNMENT"
+            source_type = "GOVERNMENT"
         elif domain in {'reuters.com', 'apnews.com', 'afp.com', 'afp.fr', 'bbc.com', 'bbc.co.uk', 'france24.com', 'rfi.fr'}:
-            source_tier = "TIER1_NEWS_AGENCY"
-        elif domain in {'jeuneafrique.com', 'africanews.com', 'cameroon-tribune.cm', 'crtv.cm', 'journalducameroun.com'}:
-            source_tier = "TIER1_AFRICAN_NEWS"
+            source_type = "MAJOR_NEWS"
+        elif domain in {'jeuneafrique.com', 'africanews.com', 'cameroon-tribune.cm', 'crtv.cm', 'journalducameroun.com', 'actucameroun.com'}:
+            source_type = "CREDIBLE_LOCAL_NEWS"
 
         crawl_data = c.get("crawl_data") or {}
         snippet = ""
@@ -75,7 +75,7 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
                 snippet = raw[:1000]
 
         candidates_buffer.write(
-            f"  [{i}] Score: {score} | Domain: {domain} | Tier: {source_tier} | Engine: {engine}\n"
+            f"  [{i}] Score: {score} | Domain: {domain} | Type: {source_type} | Engine: {engine}\n"
             f"      Title: {title}\n"
             f"      Published: {publish_date}\n"
             f"      Crawled page content:\n{snippet}\n\n"
@@ -92,25 +92,28 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
     crawl_anomalies = _detect_crawl_anomalies(top_candidates)
     crawl_text = "\n".join(crawl_anomalies) if crawl_anomalies else "  None detected."
 
-    # NEW: Check for strong primary source evidence
+    # Check for strong primary source evidence
     has_govt_source = statistics.get('government_sources', 0) > 0
     has_tier1_news = statistics.get('tier1_news_sources', 0) > 0
+    has_credible_local_news = statistics.get('credible_local_news_sources', 0) > 0
     has_specific_date = any(e.get('date') for e in timeline)
 
-    # NEW: Build source quality summary for the LLM
+    # Build source quality summary — simplified markers
     source_quality_summary = []
     if has_govt_source:
-        source_quality_summary.append("✓ Official government/presidential source present")
+        source_quality_summary.append("✓ Official government source present")
     if has_tier1_news:
-        source_quality_summary.append("✓ Tier-1 international news agency present")
+        source_quality_summary.append("✓ Major news agency present")
+    if has_credible_local_news:
+        source_quality_summary.append("✓ Credible local news outlet present")
     if has_specific_date:
         source_quality_summary.append("✓ Specific publication date(s) available")
     if not source_quality_summary:
-        source_quality_summary.append("⚠ No high-authority primary sources detected")
+        source_quality_summary.append("No high-authority sources detected — be cautious")
 
     source_quality_text = "\n".join(source_quality_summary)
 
-    # NEW: Build crawl status section
+    # Build crawl status section
     crawl_status_data = statistics.get('crawl_status', {})
     results_crawled = crawl_status_data.get('results_crawled', 10)
     successful_crawls = crawl_status_data.get('successful_crawls', 0)
@@ -131,7 +134,7 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
         crawl_status_text = f"Crawl attempt: {successful_crawls}/{results_crawled} successful (no failures)."
         crawl_failure_note = ""
 
-    # NEW: Detect if any crawled sources had paywalls
+    # Detect if any crawled sources had paywalls
     paywall_domains = []
     for c in top_candidates[:10]:
         crawl_data = c.get("crawl_data") or {}
@@ -141,7 +144,7 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
 
     paywall_text = ""
     if paywall_domains:
-        paywall_text = f"⚠ Paywall detected on: {', '.join(paywall_domains)} — content may be truncated."
+        paywall_text = f"Paywall detected on: {', '.join(paywall_domains)} — content may be truncated."
 
     return f"""You are a digital forensics and misinformation analysis expert specialized in Cameroon and African fact-checking. Your job is to analyze reverse image search results to verify or debunk a specific claim made by the user.
 
@@ -150,53 +153,39 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
 
 **Focus your analysis on this specific claim.** Determine if the search results confirm the claim, contradict it, or are inconclusive.
 
-## SOURCE HIERARCHY — WEIGHT THESE HEAVILY
+## SOURCE CREDIBILITY — WHAT TO WEIGHT HEAVILY
 
-You must evaluate claims based on the QUALITY of sources, not just QUANTITY. Follow this hierarchy strictly:
+Evaluate claims based on the QUALITY of sources, not just QUANTITY:
 
-**TIER 1 — OFFICIAL GOVERNMENT / PRESIDENTIAL SOURCES (STRONGEST)**
+**OFFICIAL GOVERNMENT SOURCES (STRONGEST)**
 - Domains like: prc.cm, presidence.cm, whitehouse.gov, elysee.fr, state.gov
 - Cameroonian government sites: any .gov.cm, ministerial sites
-- These are PRIMARY sources. A specific, dated press release from an official presidential website is STRONG evidence on its own.
-- If an official government source confirms the claim with a specific date, the verdict should be "real" or "likely" (NOT "unconfirmed").
-- A SINGLE official source with specifics beats ten blog posts.
-- DO NOT demand "extensive corroboration from other highly reputable outlets" when you already have an official source.
+- A specific, dated press release from an official presidential website is STRONG evidence on its own.
+- If an official source confirms the claim with a specific date, the verdict should be "real" or "likely" (NOT "unconfirmed").
 
-**TIER 2 — LOCAL ESTABLISHED MEDIA (Cameroon & Africa)**
-- Domains like: crtv.cm, cameroon-tribune.cm, journalducameroun.com, actucameroun.com
-- Weight them like international agencies for local claims.
+**CREDIBLE NEWS SOURCES**
+- International: Reuters, AFP, AP, BBC, France24, RFI
+- Local established media: cameroon-tribune.cm, crtv.cm, journalducameroun.com, actucameroun.com, jeuneafrique.com, africanews.com
+- One credible news source with a specific date and detailed reporting is enough to consider a claim "real" or "likely".
+- A SINGLE credible source with specifics beats ten blog posts.
 - Sources in French are the default for official Cameroonian content. Do NOT penalize French-language sources.
 
-**TIER 3 — INTERNATIONAL NEWS AGENCIES WITH LOCAL PRESENCE**
-- Reuters, AFP, AP, BBC, France24, RFI
-- One tier-1 agency + one official source = "real".
-- One tier-1 agency alone with specifics = "likely" or "real".
-
-**TIER 4 — VERIFIED SOCIAL PAGES**
+**VERIFIED SOCIAL PAGES**
 - Official Facebook pages: PRC TV Cameroun, ministries, CRTV
-- Timestamped posts are valid. Not as strong as .gov.cm, but real evidence.
+- Timestamped posts are valid. Not as strong as official sites, but real evidence.
 
-**TIER 5 — OTHER .cm / LOCAL SOURCES**
+**OTHER LOCAL SOURCES**
 - Diaspora blogs, local forums. Weak alone, OK as supporting context.
-
-**TIER 6 — WHATSAPP / UNKNOWN**
-- No domain, no date, no text. Note the origin. Do not auto-downgrade, but do not rely on it alone.
 
 ## KEY RULES (DO NOT IGNORE)
 
-1. **DATE SPECIFICITY MATTERS**: Exact date (e.g. "15 mars 2024") > vague timing ("recently"). Multiple sources with the SAME specific date = corroboration, NOT "coordinated push."
+1. **DATE SPECIFICITY MATTERS**: Exact date (e.g. "15 mars 2019") > vague timing ("recently"). Multiple sources with the SAME specific date = corroboration.
 
-2. **DO NOT OVER-DEMAND CORROBORATION**: A single official presidential press release is better evidence than 10 blog posts. "Lack of extensive corroboration" is NOT a valid reason for "unconfirmed" when primary sources exist.
+2. **DO NOT OVER-DEMAND CORROBORATION**: A single credible news article with a specific date is enough. Do NOT say "unconfirmed" when a credible local source already confirms the claim.
 
-3. **CONFIDENCE CALIBRATION**:
-   - If an official source confirms with date: confidence ≥ 0.75
-   - If tier-1 news + official source agree: confidence ≥ 0.85
-   - Only use "unconfirmed" when sources are genuinely absent, contradictory, or too vague.
-   - "Unconfirmed" at 80% confidence is a LOGICAL ERROR — fix the verdict instead.
+3. **A CREDIBLE SOURCE CONFIRMING = "REAL"**: If cameroon-tribune.cm, crtv.cm, or another credible local news outlet reports the claim with a specific date, the verdict should be "real" or "likely" — NOT "unconfirmed".
 
-4. **CRAWL FAILURES ARE NOT PENALTIES**: If a high-quality source (e.g. prc.cm) blocked crawling, flag it but do NOT downgrade the verdict. Use available metadata (title, URL, date) from the search result itself.
-
-5. **WHATSAPP IS CONTEXT, NOT A VERDICT**: If an image has WhatsApp compression artifacts but also appears on prc.cm or CRTV, the official source validates it. The WhatsApp origin is irrelevant in that case.
+4. **CRAWL FAILURES ARE NOT PENALTIES**: If a high-quality source blocked crawling, flag it but do NOT downgrade the verdict. Use available metadata from the search result itself.
 
 ## Source Quality Summary
 {source_quality_text}
@@ -221,7 +210,8 @@ Each result includes crawled page content from the source.
 - Sources with publication dates: {statistics.get('with_publish_date', 'N/A')}
 - Sources from trusted domains: {statistics.get('trusted_domains', 'N/A')}
 - Official government sources: {statistics.get('government_sources', 'N/A')}
-- Tier-1 news agencies: {statistics.get('tier1_news_sources', 'N/A')}
+- Major news agencies: {statistics.get('tier1_news_sources', 'N/A')}
+- Credible local news outlets: {statistics.get('credible_local_news_sources', 'N/A')}
 - Unique domains: {statistics.get('unique_domains', 'N/A')}
 
 ## Crawl Data Anomalies
@@ -232,12 +222,12 @@ Each result includes crawled page content from the source.
 
 ## Analysis Instructions
 1. **Evaluate the user's claim** — Does the crawled page content support or contradict what the user suspects?
-2. **Check source authority** — Is there an official government or tier-1 news source? If yes, weight it heavily. One is enough.
+2. **Check source credibility** — Is there an official government source? A credible news outlet? If yes, weight it heavily.
 3. **Check date consistency** — Are sources from the same specific date (corroboration) or scattered vaguely?
 4. **Evaluate source credibility** — Are top sources from known reputable/trusted domains? Or from obscure/untrustworthy domains?
 5. **Examine crawl data** — Do the crawled snippets contain sensational language, contradictory claims, lack of factual reporting, or AI-generated text?
 6. **Check for crawl failures** — If a credible source couldn't be crawled, note it but don't penalize the verdict.
-7. **DO NOT be overcautious** — If an official source with a specific date confirms the claim, return "real" or "likely", not "unconfirmed". If confidence > 0.60 and you're about to write "unconfirmed", STOP and upgrade to "likely" or "suspicious".
+7. **DO NOT be overcautious** — If a credible source with a specific date confirms the claim, return "real" or "likely", not "unconfirmed".
 
 ## Output Format
 Respond with a strict JSON object that matches this exact schema:
@@ -245,9 +235,9 @@ Respond with a strict JSON object that matches this exact schema:
   "verdict": "real|likely|fake|suspicious|unconfirmed",
   "confidence": 0.0 to 1.0,
   "short_summary": "One sentence in French or English — match the user's query language",
-  "explanation": "Detailed 3-6 sentence explanation of your reasoning. Reference the user's claim and the best crawled source(s). Be specific: name the domain, date, and what the crawled content actually says.",
+  "explanation": "Detailed 3-6 sentence explanation of your reasoning. Reference the user's claim and the best source(s). Be specific: name the domain, date, and what the content actually says.",
   "key_evidence": [
-    "Specific item from crawled content: domain, date, and what it says",
+    "Specific item from results: domain, date, and what it says",
     "Another item if available"
   ],
   "crawl_status": {{
@@ -260,21 +250,21 @@ Respond with a strict JSON object that matches this exact schema:
 }}
 
 **Verdict meanings:**
-- "real" — Official source confirms + specifics, OR multiple independent credible sources agree. Confidence: 0.75–0.95.
+- "real" — Credible source confirms with specifics. Confidence: 0.75–0.95.
 - "likely" — Credible source(s) confirm with specifics, slightly more caution than "real." Confidence: 0.60–0.80.
 - "fake" — Strong evidence of manipulation, contradiction by credible sources, or known false claim. Confidence: 0.70–0.95.
 - "suspicious" — Red flags but not conclusive. Confidence: 0.40–0.65.
 - "unconfirmed" — ONLY when: no credible sources, no specifics, genuinely contradictory/vague, or total absence of data. Confidence: 0.00–0.40.
 
-**CRITICAL GOLDEN RULE**: If you find yourself writing "unconfirmed" with confidence > 0.6, STOP. You have enough evidence. Pick "likely" or "suspicious" instead.
+**CRITICAL GOLDEN RULE**: If a credible local news outlet (cameroon-tribune.cm, crtv.cm, journalducameroun.com, actucameroun.com) or major news agency reports the claim with a specific date, pick "real" or "likely" — NEVER "unconfirmed".
 
 **EXAMPLES OF CORRECT vs. INCORRECT REASONING:**
 
-✅ CORRECT: Official government source (prc.cm) confirms with specific date → verdict "real" at 0.85 confidence.
-❌ WRONG: Same scenario → verdict "unconfirmed" at 0.75. This is a logic error. Primary sources are enough.
+✅ CORRECT: Credible local news (cameroon-tribune.cm) confirms with specific date → verdict "real".
+❌ WRONG: Same scenario → verdict "unconfirmed". This is a logic error. A credible news source is enough.
 
-✅ CORRECT: No official sources, only a local blog without date → verdict "unconfirmed" at 0.35.
-❌ WRONG: Same scenario → verdict "likely" at 0.70. Weak evidence doesn't support this.
+✅ CORRECT: No official sources, only a local blog without date → verdict "unconfirmed".
+❌ WRONG: Same scenario → verdict "likely". Weak evidence doesn't support this.
 """
 
 
@@ -360,7 +350,7 @@ def analyze_with_openrouter(prompt: str, model: str = None) -> tuple:
 
         parsed = _parse_llm_response(raw_content)
 
-        # NEW: Post-process to catch overcautious verdicts
+        # Post-process to catch overcautious verdicts
         parsed = _fix_overcautious_verdict(parsed, prompt)
 
         return parsed, raw_response
@@ -383,42 +373,41 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
     """
     Post-process LLM verdicts to fix logical inconsistencies.
 
-    If the LLM returns 'unconfirmed' with high confidence, or if the prompt
-    clearly contains strong official sources, override to 'likely' or 'real'.
+    If the LLM returns 'unconfirmed' despite credible sources being present,
+    or if the explanation contradicts the verdict, override to a more appropriate verdict.
     """
     verdict = parsed.get("verdict", "unconfirmed")
     confidence = parsed.get("confidence", 0.0)
     explanation = parsed.get("explanation", "")
 
-    # Fix 1: Unconfirmed with ANY confidence >= 0.50 is a logical error
-    # The LLM should never say "unconfirmed" when it has enough confidence to
-    # make a determination. At 50%+ confidence, there IS evidence — use it.
-    if verdict == "unconfirmed" and confidence >= 0.50:
-        logger.warning(f"Overcautious verdict detected: unconfirmed at {confidence} confidence. Upgrading to 'likely'.")
+    # Determine what credible sources are present in the prompt
+    has_govt_source = "✓ Official government source present" in prompt
+    has_major_news = "✓ Major news agency present" in prompt
+    has_credible_local = "✓ Credible local news outlet present" in prompt
+    has_any_credible_source = has_govt_source or has_major_news or has_credible_local
+    has_both_govt_and_news = has_govt_source and (has_major_news or has_credible_local)
+
+    # Fix 1: Unconfirmed with any credible source — upgrade to at least "likely"
+    if verdict == "unconfirmed" and has_any_credible_source and confidence >= 0.40:
+        logger.warning(f"Overcautious verdict: 'unconfirmed' despite credible source present. Upgrading to 'likely'.")
         parsed["verdict"] = "likely"
-        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'unconfirmed' because confidence was high but verdict was too cautious.]"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'unconfirmed' because credible sources confirming the claim were present.]"
 
-    # Fix 2: If prompt mentions official government sources and confidence is high
-    if "✓ Official government/presidential source present" in prompt and confidence >= 0.65:
-        if verdict in ("unconfirmed", "suspicious"):
-            logger.warning(f"Overcautious verdict detected: {verdict} despite official govt source. Upgrading to 'likely'.")
-            parsed["verdict"] = "likely"
-            parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded because an official government source with specific details was present.]"
+    # Fix 2: Unconfirmed with credible local news + any other source — upgrade to "real"
+    if verdict in ("unconfirmed", "likely") and has_credible_local and (has_govt_source or has_major_news) and confidence >= 0.50:
+        logger.info(f"Strong corroboration: credible local news + another credible source. Upgrading to 'real'.")
+        parsed["verdict"] = "real"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded to 'real' because multiple credible sources confirm the claim.]"
 
-    # Fix 3: If both govt + tier1 news present, should be at least "likely"
-    if ("✓ Official government/presidential source present" in prompt and
-        "✓ Tier-1 international news agency present" in prompt and
-        confidence >= 0.70):
-        if verdict in ("unconfirmed", "suspicious", "likely"):
-            logger.info(f"Strong corroboration detected (govt + tier1). Upgrading verdict to 'real'.")
-            parsed["verdict"] = "real"
-            parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded to 'real' due to corroboration between official government source and tier-1 news agency.]"
+    # Fix 3: Suspicious with credible source present — downgrading verdict to "likely"
+    if verdict == "suspicious" and has_any_credible_source and confidence >= 0.50:
+        logger.warning(f"Overcautious verdict: 'suspicious' despite credible source. Upgrading to 'likely'.")
+        parsed["verdict"] = "likely"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'suspicious' to 'likely' because credible sources support the claim.]"
 
-    # Fix 4: If the explanation itself says the claim is "supported" or "confirmed"
-    # by sources, but the verdict is still "unconfirmed", upgrade it.
-    # This catches cases where the LLM contradicts its own reasoning.
+    # Fix 4: If the explanation says the claim is supported by sources but verdict is still cautious
     explanation_lower = explanation.lower()
-    if verdict in ("unconfirmed", "suspicious"):
+    if verdict in ("unconfirmed", "suspicious", "likely"):
         positive_signals = [
             "supported by", "confirmed by", "corroborated by",
             "indicates that", "evidence suggests", "credible source",
@@ -426,8 +415,8 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
             "consistent with", "multiple sources",
         ]
         positive_count = sum(1 for phrase in positive_signals if phrase in explanation_lower)
-        if positive_count >= 2 and confidence >= 0.55:
-            new_verdict = "likely" if confidence < 0.80 else "real"
+        if positive_count >= 2 and confidence >= 0.50:
+            new_verdict = "real" if (confidence >= 0.75 or (positive_count >= 3 and has_any_credible_source)) else "likely"
             logger.warning(
                 f"Self-contradicting verdict detected: LLM explanation has {positive_count} "
                 f"positive signals but verdict is '{verdict}'. Upgrading to '{new_verdict}'."
@@ -435,16 +424,8 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
             parsed["verdict"] = new_verdict
             parsed["explanation"] = explanation + (
                 f" [SYSTEM NOTE: Verdict upgraded from '{verdict}' to '{new_verdict}' because "
-                f"the explanation contained {positive_count} positive evidence indicators "
-                f"contradicting the cautious verdict.]"
+                f"the explanation contained positive evidence indicators contradicting the cautious verdict.]"
             )
-
-    # Fix 5: Suspicious with high confidence should be "likely" — if you're
-    # confident enough, commit to a direction rather than hedging.
-    if verdict == "suspicious" and confidence >= 0.70:
-        logger.warning(f"High-confidence suspicious detected at {confidence}. Upgrading to 'likely'.")
-        parsed["verdict"] = "likely"
-        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'suspicious' to 'likely' because confidence was high enough to make a determination.]"
 
     return parsed
 

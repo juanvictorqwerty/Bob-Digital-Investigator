@@ -197,14 +197,14 @@ class GenerateResearchQueriesTests(SimpleTestCase):
         """real verdict returns confirming queries."""
         queries = generate_research_queries("Some claim", "real")
         self.assertGreater(len(queries), 0)
-        self.assertTrue(any("confirmed" in q for q in queries))
+        self.assertTrue(any("background" in q for q in queries))
         self.assertTrue(any("official statement" in q for q in queries))
 
     def test_likely_verdict(self):
         """likely verdict returns confirming queries."""
         queries = generate_research_queries("Some claim", "likely")
         self.assertGreater(len(queries), 0)
-        self.assertTrue(any("confirmed" in q for q in queries))
+        self.assertTrue(any("background" in q for q in queries))
 
     def test_unconfirmed_verdict(self):
         """unconfirmed verdict returns clarification queries."""
@@ -229,34 +229,22 @@ class FallbackReportTests(SimpleTestCase):
 
     def test_fallback_structure(self):
         """Fallback report has all expected keys."""
-        search_results = {"general": [], "images": [], "videos": []}
-        report = _fallback_report(search_results, "fake")
-        expected_keys = {"summary", "key_findings", "sources", "images", "videos"}
+        report = _fallback_report("fake", "test claim")
+        expected_keys = {"summary", "additional_context", "reality_check"}
         self.assertEqual(set(report.keys()), expected_keys)
 
-    def test_fallback_selects_top_results(self):
-        """Fallback selects top 5 general, 5 images, 3 videos."""
-        general = [{"title": f"Result {i}", "url": f"https://example{i}.com", "snippet": "Snippet", "domain": f"example{i}.com"} for i in range(10)]
-        images = [{"thumbnail_url": f"https://img{i}.com", "source_url": f"https://src{i}.com", "title": f"Img {i}"} for i in range(10)]
-        videos = [{"url": f"https://vid{i}.com", "thumbnail_url": "", "title": f"Vid {i}", "source": "youtube", "duration": "1:00"} for i in range(10)]
-
-        report = _fallback_report({"general": general, "images": images, "videos": videos}, "fake")
-        self.assertEqual(len(report["sources"]), 5)
-        self.assertEqual(len(report["images"]), 5)
-        self.assertEqual(len(report["videos"]), 3)
-
     def test_fallback_handles_empty(self):
-        """Fallback handles empty search results gracefully."""
-        report = _fallback_report({"general": [], "images": [], "videos": []}, "real")
-        self.assertEqual(report["sources"], [])
-        self.assertEqual(report["images"], [])
-        self.assertEqual(report["videos"], [])
-        self.assertIn("real", report["summary"])  # verdict in summary
+        """Fallback handles gracefully."""
+        report = _fallback_report("real", "test claim")
+        self.assertIn("TRUE", report["summary"])
 
     def test_fallback_summary_contains_verdict(self):
         """Fallback summary mentions the verdict."""
-        report = _fallback_report({"general": [], "images": [], "videos": []}, "suspicious")
-        self.assertIn("suspicious", report["summary"])
+        report = _fallback_report("suspicious", "test claim")
+        self.assertEqual(report["reality_check"], (
+            "The claim was assessed as FAKE. "
+            "Review the provided sources for the verified version of events."
+        ))
 
 
 class EmptyReportTests(SimpleTestCase):
@@ -266,10 +254,8 @@ class EmptyReportTests(SimpleTestCase):
         """_empty_report returns the expected empty dict."""
         report = _empty_report()
         self.assertEqual(report["summary"], "")
-        self.assertEqual(report["key_findings"], [])
-        self.assertEqual(report["sources"], [])
-        self.assertEqual(report["images"], [])
-        self.assertEqual(report["videos"], [])
+        self.assertIsNone(report["additional_context"])
+        self.assertIsNone(report["reality_check"])
 
 
 class ParseLlmResponseResearchTests(SimpleTestCase):
@@ -279,21 +265,16 @@ class ParseLlmResponseResearchTests(SimpleTestCase):
         """Valid JSON is parsed correctly."""
         response = json.dumps({
             "summary": "Research summary here",
-            "key_findings": ["Finding 1", "Finding 2"],
-            "sources": [{"title": "Source 1", "url": "https://example.com", "snippet": "Snippet", "domain": "example.com"}],
-            "images": [{"thumbnail_url": "https://img.com", "source_url": "https://src.com", "title": "Image 1"}],
-            "videos": [{"url": "https://vid.com", "thumbnail_url": "", "title": "Video 1", "source": "youtube", "duration": "1:00"}],
+            "additional_context": None,
+            "reality_check": "This is the truth",
         })
         result = _parse_llm_response(response)
         self.assertEqual(result["summary"], "Research summary here")
-        self.assertEqual(len(result["key_findings"]), 2)
-        self.assertEqual(len(result["sources"]), 1)
-        self.assertEqual(len(result["images"]), 1)
-        self.assertEqual(len(result["videos"]), 1)
+        self.assertEqual(result["reality_check"], "This is the truth")
 
     def test_markdown_code_fences(self):
         """Markdown ```json ... ``` fences should be stripped."""
-        response = '```json\n{"summary": "S", "key_findings": [], "sources": [], "images": [], "videos": []}\n```'
+        response = '```json\n{"summary": "S", "additional_context": null, "reality_check": null}\n```'
         result = _parse_llm_response(response)
         self.assertEqual(result["summary"], "S")
 
@@ -307,23 +288,8 @@ class ParseLlmResponseResearchTests(SimpleTestCase):
         response = json.dumps({"summary": "Only summary"})
         result = _parse_llm_response(response)
         self.assertEqual(result["summary"], "Only summary")
-        self.assertEqual(result["key_findings"], [])
-        self.assertEqual(result["sources"], [])
-
-    def test_non_list_fields_default_to_empty(self):
-        """Non-list key_findings/sources/images/videos default to []."""
-        response = json.dumps({
-            "summary": "S",
-            "key_findings": "not a list",
-            "sources": "not a list",
-            "images": "not a list",
-            "videos": "not a list",
-        })
-        result = _parse_llm_response(response)
-        self.assertEqual(result["key_findings"], [])
-        self.assertEqual(result["sources"], [])
-        self.assertEqual(result["images"], [])
-        self.assertEqual(result["videos"], [])
+        self.assertIsNone(result["additional_context"])
+        self.assertIsNone(result["reality_check"])
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -354,8 +320,6 @@ class BuildResearchPromptTests(SimpleTestCase):
         self.assertIn("RESEARCH STRATEGY", prompt)
         self.assertIn("SEARCH QUERIES USED", prompt)
         self.assertIn("WEB SEARCH RESULTS", prompt)
-        self.assertIn("IMAGE SEARCH RESULTS", prompt)
-        self.assertIn("VIDEO SEARCH RESULTS", prompt)
         self.assertIn("YOUR TASK", prompt)
         self.assertIn("JSON", prompt)
 
@@ -363,7 +327,7 @@ class BuildResearchPromptTests(SimpleTestCase):
         """Fake/suspicious verdict uses truth strategy."""
         prompt = build_research_prompt("claim", "fake", 0.8, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
         self.assertIn("FALSE or SUSPICIOUS", prompt)
-        self.assertIn("what ACTUALLY happened", prompt)
+        self.assertIn("what actually happened", prompt)
 
         prompt_susp = build_research_prompt("claim", "suspicious", 0.5, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
         self.assertIn("FALSE or SUSPICIOUS", prompt_susp)
@@ -372,7 +336,7 @@ class BuildResearchPromptTests(SimpleTestCase):
         """Real/likely verdict uses reinforcing strategy."""
         prompt = build_research_prompt("claim", "real", 0.9, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
         self.assertIn("TRUE or LIKELY TRUE", prompt)
-        self.assertIn("additional supporting evidence", prompt)
+        self.assertIn("reinforcing this finding", prompt)
 
         prompt_likely = build_research_prompt("claim", "likely", 0.7, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
         self.assertIn("TRUE or LIKELY TRUE", prompt_likely)
@@ -386,10 +350,8 @@ class BuildResearchPromptTests(SimpleTestCase):
         """Prompt handles empty search results gracefully."""
         prompt = build_research_prompt("claim", "fake", 0.8, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
         self.assertIn("(No general web results found)", prompt)
-        self.assertIn("(No image results found)", prompt)
-        self.assertIn("(No video results found)", prompt)
 
-    def test_prompt_includes_confidence_percentage(self):
-        """Confidence should appear as a percentage in the prompt."""
+    def test_prompt_includes_verdict_mapped(self):
+        """Prompt should include the mapped verdict."""
         prompt = build_research_prompt("claim", "real", 0.75, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
-        self.assertIn("75%", prompt)
+        self.assertIn("TRUE", prompt)

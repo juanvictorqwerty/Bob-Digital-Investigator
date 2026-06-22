@@ -122,6 +122,16 @@ def run_research_generation(self, analysis_id):
             generated_queries=queries,
         )
 
+        # Step 4b: Extract additional sources from SearXNG results
+        additional_sources = []
+        for r in search_results.get('general', [])[:15]:
+            additional_sources.append({
+                'title': r.get('title', ''),
+                'url': r.get('url', ''),
+                'domain': r.get('domain', ''),
+                'snippet': r.get('snippet', '')[:300] if r.get('snippet') else '',
+            })
+
         # Step 5: Save to DB (95-100%)
         self.update_state(
             state="PROGRESS",
@@ -131,15 +141,17 @@ def run_research_generation(self, analysis_id):
             }
         )
 
+        # Include additional sources alongside the LLM summary
+        report['additional_sources'] = additional_sources
+
         analysis.research_queries = queries
         analysis.research_report = report
         analysis.save(update_fields=['research_queries', 'research_report'])
 
         logger.info(
             f"Research report saved for analysis {analysis_id}: "
-            f"{len(report.get('sources', []))} sources, "
-            f"{len(report.get('images', []))} images, "
-            f"{len(report.get('videos', []))} videos"
+            f"summary={len(report.get('summary', ''))} chars, "
+            f"sources={len(additional_sources)}"
         )
 
         return {

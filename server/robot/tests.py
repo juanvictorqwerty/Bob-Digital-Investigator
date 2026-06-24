@@ -418,20 +418,19 @@ class ParseLlmResponseTests(SimpleTestCase):
 class FixOvercautiousVerdictTests(SimpleTestCase):
     """Tests for _fix_overcautious_verdict()."""
 
-    def test_unconfirmed_high_confidence_upgraded(self):
-        """unconfirmed with confidence >= 0.50 should upgrade to 'likely'."""
+    def test_unconfirmed_no_source_count_no_upgrade(self):
+        """unconfirmed with no source count in prompt stays unchanged."""
         verdict = {"verdict": "unconfirmed", "confidence": 0.55, "explanation": "Some evidence"}
         prompt = "Some prompt"
         result = _fix_overcautious_verdict(verdict, prompt)
-        self.assertEqual(result["verdict"], "likely")
-        self.assertIn("SYSTEM NOTE", result["explanation"])
+        self.assertEqual(result["verdict"], "unconfirmed")
 
     def test_govt_source_present_upgraded(self):
-        """govt source + high confidence → upgrade from unconfirmed/suspicious."""
+        """govt source + overcautious verdict → upgrade to 'real'."""
         prompt = "✓ Official government/presidential source present"
         verdict = {"verdict": "unconfirmed", "confidence": 0.70, "explanation": "Some explanation"}
         result = _fix_overcautious_verdict(verdict, prompt)
-        self.assertEqual(result["verdict"], "likely")
+        self.assertEqual(result["verdict"], "real")
 
     def test_govt_plus_tier1_upgraded_to_real(self):
         """Govt + tier1 + confidence >= 0.70 → upgrade to 'real'."""
@@ -444,7 +443,7 @@ class FixOvercautiousVerdictTests(SimpleTestCase):
         self.assertEqual(result["verdict"], "real")
 
     def test_self_contradicting_explanation_upgraded(self):
-        """Explanation with positive signals but cautious verdict should be upgraded."""
+        """Explanation with positive signals but no source count stays unchanged."""
         verdict = {
             "verdict": "unconfirmed",
             "confidence": 0.60,
@@ -452,13 +451,13 @@ class FixOvercautiousVerdictTests(SimpleTestCase):
         }
         prompt = "prompt"
         result = _fix_overcautious_verdict(verdict, prompt)
-        self.assertIn(result["verdict"], ("likely", "real"))
+        self.assertEqual(result["verdict"], "unconfirmed")
 
-    def test_suspicious_high_confidence_upgraded(self):
-        """suspicious with confidence >= 0.70 should upgrade to 'likely'."""
+    def test_suspicious_no_source_count_no_upgrade(self):
+        """suspicious with no source count in prompt stays unchanged."""
         verdict = {"verdict": "suspicious", "confidence": 0.75, "explanation": "Some evidence"}
         result = _fix_overcautious_verdict(verdict, "prompt")
-        self.assertEqual(result["verdict"], "likely")
+        self.assertEqual(result["verdict"], "suspicious")
 
     def test_no_change_when_no_issues(self):
         """Correct verdicts should remain unchanged."""

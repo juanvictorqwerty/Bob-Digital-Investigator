@@ -94,7 +94,7 @@ def search_general(query, page=1, language='auto'):
         language: Language code or 'auto'
 
     Returns:
-        List of result dicts with: title, url, snippet, engine, domain, score
+        List of result dicts with: title, url, snippet, engine, domain, published_date
     """
     data = _search(query, categories=['general'], page=page, language=language)
     if not data:
@@ -110,7 +110,6 @@ def search_general(query, page=1, language='auto'):
             'snippet': item.get('content', ''),
             'engine': ', '.join(item.get('engines', [])),
             'domain': domain,
-            'score': item.get('score', 0),
             'published_date': item.get('publishedDate'),
             'thumbnail': item.get('thumbnail', ''),
         })

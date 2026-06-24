@@ -1,0 +1,173 @@
+services:
+  # ── Database ──────────────────────────────────────────────
+  database:
+    image: postgres:17
+    restart: unless-stopped
+    volumes:
+      - postgresql_data:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: ${DB_NAME:-bob}
+      POSTGRES_USER: ${DB_USER:-bob}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bob} -d ${DB_NAME:-bob}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bob-network
+
+  # ── Redis (broker + cache) ────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bob-network
+
+  # ── SearXNG (metasearch engine) ───────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./server/searxng_settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bob-network
+
+  # ── Django Backend ────────────────────────────────────────
+  django:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SEARXNG_BASE_URL: http://searxng:8080
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    networks:
+      - bob-network
+
+  # ── Celery Worker ─────────────────────────────────────────
+  celery-worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A _Project worker -l info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SEARXNG_BASE_URL: http://searxng:8080
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+      django:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A _Project inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - bob-network
+
+  # ── Next.js Frontend (Bun) ────────────────────────────────
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:8000
+      BACKEND_INTERNAL_URL: http://django:8000
+    depends_on:
+      - django
+    networks:
+      - bob-network
+
+  # ── Prometheus (metrics) ──────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./server/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      - django
+    networks:
+      - bob-network
+
+  # ── Grafana (dashboards) ──────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./server/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./server/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - bob-network
+
+networks:
+  bob-network:
+    driver: bridge
+
+volumes:
+  postgresql_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

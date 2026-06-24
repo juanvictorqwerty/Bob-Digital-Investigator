@@ -3,10 +3,6 @@ Research report generator for the Bob Digital Investigator.
 
 After the robot analysis determines a verdict (real/likely/fake/suspicious/unconfirmed),
 this module performs additional SearXNG searches and compiles a structured research report.
-
-For FAKE/SUSPICIOUS verdicts: searches for the truth behind the claim
-For REAL/LIKELY verdicts: searches for reinforcing evidence
-For UNCONFIRMED verdicts: searches for any clarifying information
 """
 import json
 import logging
@@ -14,7 +10,6 @@ from django.conf import settings
 from openai import OpenAI
 
 from .searxng_client import search_general, search_images, search_videos
-from .llm_research_prompt import build_research_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -47,18 +42,18 @@ def generate_research_queries(claim, verdict):
     if is_false:
         # Search for the truth — what actually happened
         queries.append(f"{claim} fact check")
-        queries.append(f"{claim} debunked")
-        queries.append(f"what actually happened {claim}")
+        queries.append(f"{claim} origin debunked misinformation")
+        queries.append(f"what actually happened {claim} verified truth")
     elif is_unconfirmed:
         # Search for any information that might clarify
-        queries.append(f"{claim} fact check")
-        queries.append(f"{claim} verification")
-        queries.append(f"{claim} sources")
+        queries.append(f"{claim} fact check verification")
+        queries.append(f"{claim} evidence sources")
+        queries.append(f"{claim} what is the truth")
     else:
         # Search for additional confirming evidence
-        queries.append(f"{claim}")
-        queries.append(f"{claim} confirmed")
-        queries.append(f"{claim} official statement")
+        queries.append(f"{claim} background history")
+        queries.append(f"{claim} recent developments")
+        queries.append(f"{claim} expert analysis official statement")
 
     return queries
 
@@ -67,32 +62,28 @@ def run_searxng_searches(queries):
     """
     Execute multiple SearXNG searches and aggregate results.
 
-    For the first query, we search general + images + videos.
-    For additional queries, we only search general (to get diverse sources).
+    Every query searches general + images + videos to collect
+    rich results with images and source URLs.
 
     Args:
         queries: List of search query strings
 
     Returns:
         Dict with aggregated 'general', 'images', 'videos' results
-        and deduplication applied
     """
     all_general = []
     all_images = []
     all_videos = []
     seen_urls = set()
+    seen_image_urls = set()
 
     for i, query in enumerate(queries):
         logger.info(f"SearXNG research query [{i+1}/{len(queries)}]: {query}")
 
-        if i == 0:
-            # First query: full search (general + images + videos)
-            general = search_general(query)
-            all_images = search_images(query)
-            all_videos = search_videos(query)
-        else:
-            # Subsequent queries: general only for diverse sources
-            general = search_general(query)
+        # Every query searches all categories
+        general = search_general(query)
+        images = search_images(query)
+        videos = search_videos(query)
 
         # Deduplicate general results by URL
         for r in general:
@@ -100,6 +91,16 @@ def run_searxng_searches(queries):
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 all_general.append(r)
+
+        # Deduplicate images by source_url
+        for img in images:
+            src = img.get('source_url', '')
+            if src and src not in seen_image_urls:
+                seen_image_urls.add(src)
+                all_images.append(img)
+
+        # Videos are typically few, just add them
+        all_videos.extend(videos)
 
     return {
         'general': all_general,
@@ -110,7 +111,7 @@ def run_searxng_searches(queries):
 
 def compile_research_with_llm(claim, verdict, confidence, explanation, search_results, generated_queries):
     """
-    Use the LLM to compile a structured research report from SearXNG results.
+    Use the LLM to compile a structured research summary from SearXNG results.
 
     Args:
         claim: The original user claim
@@ -121,13 +122,12 @@ def compile_research_with_llm(claim, verdict, confidence, explanation, search_re
         generated_queries: List of queries that were executed
 
     Returns:
-        Dict with 'summary', 'key_findings', 'sources', 'images', 'videos'
-        or a fallback report if LLM fails
+        Dict with the new report schema or a fallback report if LLM fails
     """
     api_key = settings.OPENROUTER_API_KEY
     if not api_key:
         logger.warning("OPENROUTER_API_KEY not set — cannot compile research with LLM")
-        return _fallback_report(search_results, verdict)
+        return _fallback_report(verdict, claim)
 
     prompt = build_research_prompt(
         claim=claim,
@@ -152,7 +152,7 @@ def compile_research_with_llm(claim, verdict, confidence, explanation, search_re
             model=RESEARCH_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=2000,
+            max_tokens=1500,
             response_format={"type": "json_object"}
         )
 
@@ -160,9 +160,7 @@ def compile_research_with_llm(claim, verdict, confidence, explanation, search_re
         parsed = _parse_llm_response(raw_content)
 
         logger.info(
-            f"LLM research compiled: {len(parsed.get('sources', []))} sources, "
-            f"{len(parsed.get('images', []))} images, "
-            f"{len(parsed.get('videos', []))} videos"
+            f"LLM research compiled: summary={len(parsed.get('summary', ''))} chars"
         )
         return parsed
 
@@ -184,7 +182,7 @@ def compile_research_with_llm(claim, verdict, confidence, explanation, search_re
                     model=RESEARCH_FALLBACK_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
-                    max_tokens=2000,
+                    max_tokens=1500,
                     response_format={"type": "json_object"}
                 )
                 raw_content = response.choices[0].message.content.strip()
@@ -193,7 +191,99 @@ def compile_research_with_llm(claim, verdict, confidence, explanation, search_re
                 logger.error(f"LLM fallback also failed: {str(fallback_err)}")
 
         # Return fallback report
-        return _fallback_report(search_results, verdict)
+        return _fallback_report(verdict, claim)
+
+
+def build_research_prompt(claim, verdict, confidence, explanation, search_results, generated_queries):
+    """
+    Build a prompt for the LLM to compile a research summary from SearXNG results.
+    """
+    # Map verdict to the three-tier system
+    if verdict in ('real', 'likely'):
+        verdict_mapped = "TRUE"
+    elif verdict in ('fake', 'suspicious'):
+        verdict_mapped = "FAKE"
+    else:
+        verdict_mapped = "UNCERTAIN"
+
+    # Determine strategy
+    if verdict_mapped == "TRUE":
+        strategy = (
+            "The claim has been assessed as TRUE or LIKELY TRUE. "
+            "Your task is to write a brief summary reinforcing this finding with "
+            "additional context and supporting evidence from the search results."
+        )
+    elif verdict_mapped == "FAKE":
+        strategy = (
+            "The claim has been assessed as FALSE or SUSPICIOUS. "
+            "Your task is to write a brief summary explaining what actually happened, "
+            "debunking the false claim using evidence from the search results."
+        )
+    else:
+        strategy = (
+            "The claim could not be confirmed due to insufficient or contradictory evidence. "
+            "Your task is to write a brief summary presenting what is known and what "
+            "remains uncertain based on the search results."
+        )
+
+    # Build general results section (used for context only)
+    general_results = search_results.get('general', [])
+    general_lines = []
+    for i, r in enumerate(general_results[:12], 1):
+        general_lines.append(
+            f"  [{i}] {r.get('title', 'No title')}\n"
+            f"      URL: {r.get('url', '')}\n"
+            f"      Domain: {r.get('domain', '')}\n"
+            f"      Snippet: {r.get('snippet', '')[:400]}\n"
+        )
+    general_text = '\n'.join(general_lines) if general_lines else "  (No general web results found)"
+
+    queries_text = '\n'.join(f"  - {q}" for q in generated_queries)
+
+    return f"""You are a digital forensics and fact-checking research assistant. You have been given
+the results of additional web searches performed to deepen the investigation of a claim.
+
+## ORIGINAL CLAIM
+{claim or "(No additional claim provided by the user)"}
+
+## PREVIOUS ANALYSIS VERDICT
+- Verdict: {verdict.upper()}
+- Mapped Verdict: {verdict_mapped}
+- Explanation: {explanation}
+
+## RESEARCH STRATEGY
+{strategy}
+
+## SEARCH QUERIES USED
+{queries_text}
+
+## WEB SEARCH RESULTS
+{general_text}
+
+## YOUR TASK
+
+Based on all the search results above, write a concise factual summary (3-5 sentences) that:
+- If verdict is TRUE: Provides additional context and reinforcing evidence from the search results
+- If verdict is FAKE: Explains what actually happened and debunks the false claim
+- If verdict is UNCERTAIN: Presents what is known and what remains uncertain
+
+Write the summary in the SAME LANGUAGE as the original claim (French if the claim is in French, English if in English).
+
+Respond with a strict JSON object matching this exact schema:
+{{
+  "summary": "Your 3-5 sentence research summary here. Keep it factual, neutral, and informative.",
+  "additional_context": "string or null — additional enriching context if verdict is TRUE. Set to null otherwise.",
+  "reality_check": "string or null — what is actually true based on sources if verdict is FAKE or UNCERTAIN. Set to null otherwise."
+}}
+
+**IMPORTANT RULES:**
+- Write the summary in the SAME LANGUAGE as the original claim (French if the claim is in French, English if in English).
+- Keep the summary factual, neutral, and informative.
+- Do NOT fabricate facts — use only what appears in the search results above.
+- The summary is the most important part — focus on clarity and accuracy.
+"""
+    # Note: The raw SearXNG results (sources) will be passed separately to the frontend
+    # so users can click through to the source articles themselves.
 
 
 def _parse_llm_response(content):
@@ -213,67 +303,48 @@ def _parse_llm_response(content):
         logger.warning(f"Failed to parse LLM research response: {e}")
         return _empty_report()
 
-    # Ensure all expected fields exist
+    # Ensure all expected fields exist with correct types
     return {
         'summary': str(data.get('summary', '')),
-        'key_findings': data.get('key_findings', []) if isinstance(data.get('key_findings'), list) else [],
-        'sources': data.get('sources', []) if isinstance(data.get('sources'), list) else [],
-        'images': data.get('images', []) if isinstance(data.get('images'), list) else [],
-        'videos': data.get('videos', []) if isinstance(data.get('videos'), list) else [],
+        'additional_context': data.get('additional_context') if data.get('additional_context') else None,
+        'reality_check': data.get('reality_check') if data.get('reality_check') else None,
     }
 
 
-def _fallback_report(search_results, verdict):
+def _fallback_report(verdict, claim):
     """
     Generate a basic report without LLM when it's unavailable.
-    Simply selects the top results from SearXNG.
+    Uses the same schema as the LLM-generated report.
     """
-    general = search_results.get('general', [])
-    images = search_results.get('images', [])
-    videos = search_results.get('videos', [])
-
-    # Pick top 5 general results as sources
-    sources = []
-    for r in general[:5]:
-        sources.append({
-            'title': r.get('title', ''),
-            'url': r.get('url', ''),
-            'snippet': r.get('snippet', ''),
-            'domain': r.get('domain', ''),
-        })
-
-    # Pick top 5 images
-    img_list = []
-    for img in images[:5]:
-        img_list.append({
-            'thumbnail_url': img.get('thumbnail_url', ''),
-            'source_url': img.get('source_url', ''),
-            'title': img.get('title', ''),
-        })
-
-    # Pick top 3 videos
-    vid_list = []
-    for vid in videos[:3]:
-        vid_list.append({
-            'url': vid.get('url', ''),
-            'thumbnail_url': vid.get('thumbnail_url', ''),
-            'title': vid.get('title', ''),
-            'source': vid.get('source', ''),
-            'duration': vid.get('duration'),
-        })
+    # Map verdict
+    if verdict in ('real', 'likely'):
+        verdict_mapped = "TRUE"
+    elif verdict in ('fake', 'suspicious'):
+        verdict_mapped = "FAKE"
+    else:
+        verdict_mapped = "UNCERTAIN"
 
     summary = (
-        f"Automated research results for a claim assessed as '{verdict}'. "
-        f"Found {len(sources)} relevant sources, {len(img_list)} related images, "
-        f"and {len(vid_list)} related videos."
+        f"The claim was assessed as {verdict_mapped}. "
+        f"Additional research sources were found — review the provided links for details."
     )
+
+    additional_context = None
+    reality_check = None
+    if verdict_mapped == "TRUE":
+        additional_context = (
+            f"The claim was assessed as TRUE. Review the provided sources for supporting evidence."
+        )
+    else:
+        reality_check = (
+            f"The claim was assessed as {verdict_mapped}. "
+            f"Review the provided sources for the verified version of events."
+        )
 
     return {
         'summary': summary,
-        'key_findings': [],
-        'sources': sources,
-        'images': img_list,
-        'videos': vid_list,
+        'additional_context': additional_context,
+        'reality_check': reality_check,
     }
 
 
@@ -281,10 +352,8 @@ def _empty_report():
     """Return an empty report structure."""
     return {
         'summary': '',
-        'key_findings': [],
-        'sources': [],
-        'images': [],
-        'videos': [],
+        'additional_context': None,
+        'reality_check': None,
     }
 
 
@@ -298,7 +367,8 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
         processed_data: The full processed results dict
 
     Returns:
-        Tuple of (research_queries, research_report) for storage in RobotAnalysis
+        Tuple of (research_queries, research_report, additional_sources)
+        where additional_sources is a list of source dicts with title, url, domain, snippet
     """
     claim = websearch_result.query or ""
     verdict = robot_analysis.get('verdict', 'unconfirmed')
@@ -309,11 +379,11 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
     queries = generate_research_queries(claim, verdict)
     if not queries:
         logger.info("No research queries generated (empty claim)")
-        return [], _empty_report()
+        return [], _empty_report(), []
 
     logger.info(f"Generated {len(queries)} research queries for verdict '{verdict}'")
 
-    # Step 2: Execute SearXNG searches
+    # Step 2: Execute SearXNG searches (all queries get images+videos)
     search_results = run_searxng_searches(queries)
     total_results = (
         len(search_results.get('general', []))
@@ -322,7 +392,17 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
     )
     logger.info(f"SearXNG returned {total_results} total results")
 
-    # Step 3: Compile research report with LLM
+    # Extract additional sources from SearXNG results for the frontend
+    additional_sources = []
+    for r in search_results.get('general', [])[:15]:
+        additional_sources.append({
+            'title': r.get('title', ''),
+            'url': r.get('url', ''),
+            'domain': r.get('domain', ''),
+            'snippet': r.get('snippet', '')[:300] if r.get('snippet') else '',
+        })
+
+    # Step 3: Compile research summary with LLM
     report = compile_research_with_llm(
         claim=claim,
         verdict=verdict,
@@ -334,9 +414,7 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
 
     logger.info(
         f"Research report generated: summary={len(report.get('summary', ''))} chars, "
-        f"sources={len(report.get('sources', []))}, "
-        f"images={len(report.get('images', []))}, "
-        f"videos={len(report.get('videos', []))}"
+        f"sources={len(additional_sources)}"
     )
 
-    return queries, report
+    return queries, report, additional_sources

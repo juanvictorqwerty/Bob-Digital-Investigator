@@ -116,6 +116,18 @@ export default function ResultsPage({
   >([]);
   const [researchProgress, setResearchProgress] = useState("");
   const [researchProgressStep, setResearchProgressStep] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Auto-collapse sidebar on small screens
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 1023px)");
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => {
+      setSidebarCollapsed(e.matches);
+    };
+    handler(mql); // set initial state
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   // Sync internal state when the prop changes (e.g. user selects a different history item)
   useEffect(() => {
@@ -331,20 +343,52 @@ export default function ResultsPage({
     [onSelectHistoryResult]
   );
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
   // ── Layout ────────────────────────────────────────────────────────────────
-  // The key insight: header and footer must live INSIDE the right column,
-  // not at viewport level, so they don't bleed over the sidebar.
   return (
     <div className="h-screen bg-linear-to-br from-gray-50 to-gray-100 flex overflow-hidden">
-      {/* ── Left Sidebar (full height, fixed width) ── */}
-      <aside className="bg-blue-50 w-[260px] shrink-0 border-r-2 border-gray-400 flex flex-col h-full overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-4">
-          <HistoryBlock
-            onSelectResult={handleHistorySelect}
-            onAliasUpdate={onAliasUpdate}
-          />
-        </div>
-      </aside>
+      {/* ── Left Sidebar (full height, collapsible) ── */}
+      {/* Collapsed: thin bar with toggle; Expanded: full sidebar */}
+      {sidebarCollapsed ? (
+        <aside className="bg-blue-50 w-[40px] shrink-0 border-r-2 border-gray-400 flex flex-col items-center py-2 h-full overflow-hidden">
+          <button
+            onClick={toggleSidebar}
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-200 transition-colors text-blue-700"
+            title="Open history"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+          </button>
+          <div className="flex-1 flex items-center justify-center">
+            <span className="text-sm" title="History panel">🔍</span>
+          </div>
+        </aside>
+      ) : (
+        <aside className="bg-blue-50 w-[260px] shrink-0 border-r-2 border-gray-400 flex flex-col h-full overflow-hidden">
+          {/* Collapse button at top of sidebar */}
+          <div className="flex justify-end pt-1 pr-1">
+            <button
+              onClick={toggleSidebar}
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-200 transition-colors text-blue-700"
+              title="Collapse sidebar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <HistoryBlock
+              onSelectResult={handleHistorySelect}
+              onAliasUpdate={onAliasUpdate}
+            />
+          </div>
+        </aside>
+      )}
 
       {/* ── Right Column: header + scrollable body + footer, all scoped ── */}
       <div ref={rightColRef} className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
@@ -425,12 +469,6 @@ export default function ResultsPage({
         </main>
 
         {/* ── Robot Response Footer (scoped to right column) ── */}
-        {/*
-          Always render when robot data exists — covers both live results
-          and history items that carry robot_analysis.
-          Using `sticky bottom-0` keeps it at the base of the flex column
-          rather than viewport-fixed, so it stays within the right panel.
-        */}
         {robot ? (
           <footer className="shrink-0 bg-white/95 backdrop-blur-sm border-t-2 border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] z-30">
             <RobotResponse

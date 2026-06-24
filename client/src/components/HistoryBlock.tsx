@@ -119,7 +119,7 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
   };
 
   return (
-    <div className={`${BackGroundColor} h-screen flex flex-col p-2`}>
+    <div className={`${BackGroundColor} h-full flex flex-col p-2`}>
       
       <h1 className="relative mx-auto mb-3 w-fit shrink-0">
         {/* Main badge */}

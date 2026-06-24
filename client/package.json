@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "bun test",
+    "test:ci": "bun test --reporter=github-actions"
   },
   "dependencies": {
     "axios": "^1.16.1",

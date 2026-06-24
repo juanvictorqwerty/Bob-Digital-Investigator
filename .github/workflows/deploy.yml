@@ -33,11 +33,16 @@ jobs:
             # 3. Pull latest code from main
             git pull origin main
 
-            # 4. Rebuild changed images, restart containers, remove orphaned services
+            # 4. Write the multi-line .env file cleanly from the stored secret
+            cat << 'EOF' > .env
+            ${{ secrets.ENV_FILE }}
+            EOF
+
+            # 5. Rebuild changed images, restart containers, remove orphaned services
             docker compose -f docker-compose.yml up -d --build --remove-orphans
 
-            # 5. Prune unused Docker images older than 24 hours (frees disk space)
+            # 6. Prune unused Docker images older than 24 hours (frees disk space)
             docker image prune -af --filter "until=24h"
 
-            # 6. Clean build cache to prevent unbounded disk growth
+            # 7. Clean build cache to prevent unbounded disk growth
             docker builder prune -f

@@ -28,7 +28,7 @@ jobs:
 
       - name: Run client tests
         working-directory: ./client
-        run: bun test --reporter=github-actions
+        run: bun test
 
   server-tests:
     name: Server Tests (Django + PostgreSQL)
@@ -44,7 +44,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready -U bob_test -d bob_test
+          --health-cmd "pg_isready -U bob_test -d bob_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5

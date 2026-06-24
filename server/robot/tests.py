@@ -492,7 +492,7 @@ class BuildAnalysisPromptTests(SimpleTestCase):
         )
         self.assertIn("THE USER'S CLAIM TO FACT-CHECK", prompt)
         self.assertIn("Is this claim true?", prompt)
-        self.assertIn("SOURCE HIERARCHY", prompt)
+        self.assertIn("SOURCE CREDIBILITY", prompt)
         self.assertIn("Source Quality Summary", prompt)
         self.assertIn("Crawl Status", prompt)
         self.assertIn("Ranked Search Results", prompt)

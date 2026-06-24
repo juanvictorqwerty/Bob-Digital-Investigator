@@ -381,9 +381,11 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
     explanation = parsed.get("explanation", "")
 
     # Determine what credible sources are present in the prompt
-    has_govt_source = "✓ Official government source present" in prompt
-    has_major_news = "✓ Major news agency present" in prompt
-    has_credible_local = "✓ Credible local news outlet present" in prompt
+    # Use broad substring checks to be robust against prompt template variations
+    prompt_lower = prompt.lower()
+    has_govt_source = "government source" in prompt_lower or "government/presidential" in prompt_lower
+    has_major_news = "major news agency" in prompt_lower or "news agency" in prompt_lower
+    has_credible_local = "credible local news" in prompt_lower
     has_any_credible_source = has_govt_source or has_major_news or has_credible_local
     has_both_govt_and_news = has_govt_source and (has_major_news or has_credible_local)
 
@@ -399,11 +401,29 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
         parsed["verdict"] = "real"
         parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded to 'real' because multiple credible sources confirm the claim.]"
 
+    # Fix 2b: Unconfident+likely with both govt and news present → upgrade to "real"
+    if verdict in ("unconfirmed", "likely") and has_govt_source and has_major_news and confidence >= 0.70:
+        logger.info(f"Strong corroboration: govt + news agency. Upgrading to 'real'.")
+        parsed["verdict"] = "real"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded to 'real' because multiple credible sources confirm the claim.]"
+
     # Fix 3: Suspicious with credible source present — downgrading verdict to "likely"
     if verdict == "suspicious" and has_any_credible_source and confidence >= 0.50:
         logger.warning(f"Overcautious verdict: 'suspicious' despite credible source. Upgrading to 'likely'.")
         parsed["verdict"] = "likely"
         parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'suspicious' to 'likely' because credible sources support the claim.]"
+
+    # Fix 3b: High-confidence unconfirmed without sources — upgrade to "likely"
+    if verdict == "unconfirmed" and not has_any_credible_source and confidence >= 0.50:
+        logger.warning(f"High-confidence 'unconfirmed' verdict ({confidence:.0%}) without apparent source contradiction. Upgrading to 'likely'.")
+        parsed["verdict"] = "likely"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'unconfirmed' because the LLM's high confidence contradicts the cautious verdict.]"
+
+    # Fix 3c: High-confidence suspicious without sources — upgrade to "likely"
+    if verdict == "suspicious" and not has_any_credible_source and confidence >= 0.70:
+        logger.warning(f"High-confidence 'suspicious' verdict ({confidence:.0%}) without apparent source contradiction. Upgrading to 'likely'.")
+        parsed["verdict"] = "likely"
+        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'suspicious' to 'likely' because the LLM's high confidence contradicts the cautious verdict.]"
 
     # Fix 4: If the explanation says the claim is supported by sources but verdict is still cautious
     explanation_lower = explanation.lower()

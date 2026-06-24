@@ -373,59 +373,54 @@ def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
     """
     Post-process LLM verdicts to fix logical inconsistencies.
 
-    If the LLM returns 'unconfirmed' despite credible sources being present,
-    or if the explanation contradicts the verdict, override to a more appropriate verdict.
+    Rules:
+      1. If ANY credible source (govt, major news, local) is present and the
+         verdict is cautious (unconfirmed / suspicious / likely), upgrade to 'real'.
+      2. If NO credible source is found but at least 3 different sources
+         corroborate the claim (total_sources >= 3), upgrade to 'likely'.
     """
     verdict = parsed.get("verdict", "unconfirmed")
-    confidence = parsed.get("confidence", 0.0)
     explanation = parsed.get("explanation", "")
 
+    prompt_lower = prompt.lower()
+
     # Determine what credible sources are present in the prompt
-    has_govt_source = "✓ Official government source present" in prompt
-    has_major_news = "✓ Major news agency present" in prompt
-    has_credible_local = "✓ Credible local news outlet present" in prompt
+    has_govt_source = "government source" in prompt_lower or "government/presidential" in prompt_lower
+    has_major_news = "major news agency" in prompt_lower or "news agency" in prompt_lower
+    has_credible_local = "credible local news" in prompt_lower
     has_any_credible_source = has_govt_source or has_major_news or has_credible_local
-    has_both_govt_and_news = has_govt_source and (has_major_news or has_credible_local)
 
-    # Fix 1: Unconfirmed with any credible source — upgrade to at least "likely"
-    if verdict == "unconfirmed" and has_any_credible_source and confidence >= 0.40:
-        logger.warning(f"Overcautious verdict: 'unconfirmed' despite credible source present. Upgrading to 'likely'.")
-        parsed["verdict"] = "likely"
-        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'unconfirmed' because credible sources confirming the claim were present.]"
+    # Extract total source count from the Statistics section
+    import re
+    total_sources = 0
+    match = re.search(r"- Total sources found:\s*(\d+)", prompt)
+    if match:
+        total_sources = int(match.group(1))
 
-    # Fix 2: Unconfirmed with credible local news + any other source — upgrade to "real"
-    if verdict in ("unconfirmed", "likely") and has_credible_local and (has_govt_source or has_major_news) and confidence >= 0.50:
-        logger.info(f"Strong corroboration: credible local news + another credible source. Upgrading to 'real'.")
+    # Rule 1: Credible source exists + overcautious verdict → upgrade to "real"
+    if has_any_credible_source and verdict in ("unconfirmed", "suspicious", "likely"):
+        logger.warning(
+            f"Overcautious verdict: '{verdict}' despite credible source present. "
+            f"Upgrading to 'real'."
+        )
         parsed["verdict"] = "real"
-        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded to 'real' because multiple credible sources confirm the claim.]"
+        parsed["explanation"] = explanation + (
+            " [SYSTEM NOTE: Verdict upgraded to 'real' because credible sources "
+            "confirming the claim were present in the evidence.]"
+        )
 
-    # Fix 3: Suspicious with credible source present — downgrading verdict to "likely"
-    if verdict == "suspicious" and has_any_credible_source and confidence >= 0.50:
-        logger.warning(f"Overcautious verdict: 'suspicious' despite credible source. Upgrading to 'likely'.")
+    # Rule 2: No credible source but ≥ 3 sources corroborate → upgrade to "likely"
+    elif not has_any_credible_source and total_sources >= 3 and verdict in ("unconfirmed", "suspicious"):
+        logger.warning(
+            f"Cautious verdict '{verdict}' with {total_sources} sources found "
+            f"(no single authoritative source). Upgrading to 'likely'."
+        )
         parsed["verdict"] = "likely"
-        parsed["explanation"] = explanation + " [SYSTEM NOTE: Verdict upgraded from 'suspicious' to 'likely' because credible sources support the claim.]"
-
-    # Fix 4: If the explanation says the claim is supported by sources but verdict is still cautious
-    explanation_lower = explanation.lower()
-    if verdict in ("unconfirmed", "suspicious", "likely"):
-        positive_signals = [
-            "supported by", "confirmed by", "corroborated by",
-            "indicates that", "evidence suggests", "credible source",
-            "recognized local news", "adds weight", "plausible",
-            "consistent with", "multiple sources",
-        ]
-        positive_count = sum(1 for phrase in positive_signals if phrase in explanation_lower)
-        if positive_count >= 2 and confidence >= 0.50:
-            new_verdict = "real" if (confidence >= 0.75 or (positive_count >= 3 and has_any_credible_source)) else "likely"
-            logger.warning(
-                f"Self-contradicting verdict detected: LLM explanation has {positive_count} "
-                f"positive signals but verdict is '{verdict}'. Upgrading to '{new_verdict}'."
-            )
-            parsed["verdict"] = new_verdict
-            parsed["explanation"] = explanation + (
-                f" [SYSTEM NOTE: Verdict upgraded from '{verdict}' to '{new_verdict}' because "
-                f"the explanation contained positive evidence indicators contradicting the cautious verdict.]"
-            )
+        parsed["explanation"] = explanation + (
+            f" [SYSTEM NOTE: Verdict upgraded from '{verdict}' to 'likely' because "
+            f"multiple independent sources ({total_sources}) corroborate the claim, "
+            f"even though none are from verified authoritative domains.]"
+        )
 
     return parsed
 

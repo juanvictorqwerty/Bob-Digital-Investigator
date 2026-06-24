@@ -35,12 +35,10 @@ export default function Login() {
                 // 3. Set cookies using the extracted data strings
                 Cookies.set("token", data.token, {
                     expires: 60,
-                    secure: true,
                     sameSite: "strict",
                 });
                 Cookies.set("email", data.email, {
                     expires: 60,
-                    secure: true,
                     sameSite: "strict",
                 });
 
@@ -87,7 +85,6 @@ export default function Login() {
                 <button
                     type="submit"
                     className={`w-full px-4 py-2 ${ButtonColor} hover: ${ButtonColorHover} ${ButtonTextColor} rounded-md h-[50px] `}
-                    onSubmit={handleLogin}
                     disabled={isLoading}
                 >
                     {isLoading ? "Logging in..." : "Login"}

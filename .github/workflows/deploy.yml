@@ -1,0 +1,43 @@
+name: CD - Deploy to Contabo VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy via Docker Compose
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+
+            # 1. Navigate to production directory
+            cd ${{ secrets.SERVER_DEPLOY_PATH }}
+
+            # 2. Discard local changes to avoid pull conflicts
+            git reset --hard HEAD
+
+            # 3. Pull latest code from main
+            git pull origin main
+
+            # 4. Rebuild changed images, restart containers, remove orphaned services
+            docker compose -f docker-compose.yml up -d --build --remove-orphans
+
+            # 5. Prune unused Docker images older than 24 hours (frees disk space)
+            docker image prune -af --filter "until=24h"
+
+            # 6. Clean build cache to prevent unbounded disk growth
+            docker builder prune -f

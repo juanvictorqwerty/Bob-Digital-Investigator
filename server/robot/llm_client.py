@@ -357,7 +357,7 @@ Respond with a strict JSON object that matches this exact schema:
 {{
   "verdict": "real|likely|fake|suspicious|unconfirmed",
   "confidence": 0.0 to 1.0,
-  "short_summary": "One sentence in French or English — match the user's query language",
+  "short_summary": "short_summary": "Must start with 'These images show...' / 'These images do not show...' — one sentence matching the user's query language. The claim is: {query}",
   "explanation": "Detailed 3-6 sentence explanation of your reasoning. Reference the user's claim and the best source(s). Be specific: name the domain, date, and what the content actually says.",
   "key_evidence": [
     "Specific item from results: domain, date, and what it says",

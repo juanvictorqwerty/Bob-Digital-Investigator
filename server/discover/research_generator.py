@@ -430,10 +430,10 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
     )
     logger.info(f"SearXNG returned {total_results} total results")
 
-    # Extract additional sources from SearXNG results for the frontend
-    additional_sources = []
+    # Extract sources from SearXNG results for the frontend
+    sources = []
     for r in search_results.get('general', [])[:15]:
-        additional_sources.append({
+        sources.append({
             'title': r.get('title', ''),
             'url': r.get('url', ''),
             'domain': r.get('domain', ''),
@@ -456,7 +456,7 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
 
     logger.info(
         f"Research report generated: summary={len(report.get('summary', ''))} chars, "
-        f"sources={len(additional_sources)}, images={len(images)}, videos={len(videos)}"
+        f"sources={len(sources)}, images={len(images)}, videos={len(videos)}"
     )
 
-    return queries, report, additional_sources, images, videos
+    return queries, report, sources, images, videos

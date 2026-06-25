@@ -76,6 +76,7 @@ def run_searxng_searches(queries):
     all_videos = []
     seen_urls = set()
     seen_image_urls = set()
+    seen_video_urls = set()
 
     for i, query in enumerate(queries):
         logger.info(f"SearXNG research query [{i+1}/{len(queries)}]: {query}")
@@ -99,8 +100,12 @@ def run_searxng_searches(queries):
                 seen_image_urls.add(src)
                 all_images.append(img)
 
-        # Videos are typically few, just add them
-        all_videos.extend(videos)
+        # Deduplicate videos by URL
+        for vid in videos:
+            url = vid.get('url', '')
+            if url and url not in seen_video_urls:
+                seen_video_urls.add(url)
+                all_videos.append(vid)
 
     return {
         'general': all_general,
@@ -238,6 +243,32 @@ def build_research_prompt(claim, verdict, confidence, explanation, search_result
         )
     general_text = '\n'.join(general_lines) if general_lines else "  (No general web results found)"
 
+    # Build image results section
+    images_results = search_results.get('images', [])
+    images_lines = []
+    for i, img in enumerate(images_results[:10], 1):
+        images_lines.append(
+            f"  [{i}] {img.get('title', 'No title')}\n"
+            f"      Source URL: {img.get('source_url', '')}\n"
+            f"      Thumbnail: {img.get('thumbnail_url', '')}\n"
+            f"      Domain: {img.get('domain', '')}\n"
+            f"      Size: {img.get('width', 'N/A')}x{img.get('height', 'N/A')}\n"
+        )
+    images_text = '\n'.join(images_lines) if images_lines else "  (No image results found)"
+
+    # Build video results section
+    videos_results = search_results.get('videos', [])
+    videos_lines = []
+    for i, vid in enumerate(videos_results[:10], 1):
+        videos_lines.append(
+            f"  [{i}] {vid.get('title', 'No title')}\n"
+            f"      URL: {vid.get('url', '')}\n"
+            f"      Duration: {vid.get('duration', 'N/A')}\n"
+            f"      Domain: {vid.get('domain', '')}\n"
+            f"      Description: {vid.get('description', '')[:200]}\n"
+        )
+    videos_text = '\n'.join(videos_lines) if videos_lines else "  (No video results found)"
+
     queries_text = '\n'.join(f"  - {q}" for q in generated_queries)
 
     return f"""You are a digital forensics and fact-checking research assistant. You have been given
@@ -260,6 +291,12 @@ the results of additional web searches performed to deepen the investigation of 
 ## WEB SEARCH RESULTS
 {general_text}
 
+## IMAGE SEARCH RESULTS
+{images_text}
+
+## VIDEO SEARCH RESULTS
+{videos_text}
+
 ## YOUR TASK
 
 Based on all the search results above, write a concise factual summary (3-5 sentences) that:
@@ -281,9 +318,10 @@ Respond with a strict JSON object matching this exact schema:
 - Keep the summary factual, neutral, and informative.
 - Do NOT fabricate facts — use only what appears in the search results above.
 - The summary is the most important part — focus on clarity and accuracy.
+- You may reference images or videos found in the search results if they provide relevant evidence.
 """
-    # Note: The raw SearXNG results (sources) will be passed separately to the frontend
-    # so users can click through to the source articles themselves.
+    # Note: The raw SearXNG results (sources, images, videos) will be passed separately to the frontend
+    # so users can click through to the source articles and view media themselves.
 
 
 def _parse_llm_response(content):
@@ -367,7 +405,7 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
         processed_data: The full processed results dict
 
     Returns:
-        Tuple of (research_queries, research_report, additional_sources)
+        Tuple of (research_queries, research_report, additional_sources, images, videos)
         where additional_sources is a list of source dicts with title, url, domain, snippet
     """
     claim = websearch_result.query or ""
@@ -379,7 +417,7 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
     queries = generate_research_queries(claim, verdict)
     if not queries:
         logger.info("No research queries generated (empty claim)")
-        return [], _empty_report(), []
+        return [], _empty_report(), [], [], []
 
     logger.info(f"Generated {len(queries)} research queries for verdict '{verdict}'")
 
@@ -402,6 +440,10 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
             'snippet': r.get('snippet', '')[:300] if r.get('snippet') else '',
         })
 
+    # Extract images and videos for the frontend
+    images = search_results.get('images', [])[:20]
+    videos = search_results.get('videos', [])[:20]
+
     # Step 3: Compile research summary with LLM
     report = compile_research_with_llm(
         claim=claim,
@@ -414,7 +456,7 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
 
     logger.info(
         f"Research report generated: summary={len(report.get('summary', ''))} chars, "
-        f"sources={len(additional_sources)}"
+        f"sources={len(additional_sources)}, images={len(images)}, videos={len(videos)}"
     )
 
-    return queries, report, additional_sources
+    return queries, report, additional_sources, images, videos

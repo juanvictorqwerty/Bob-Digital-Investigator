@@ -4,6 +4,7 @@ Uses openai-compatible API to send prompts to OpenRouter.
 """
 import json
 import logging
+import os
 from io import StringIO
 from django.conf import settings
 from openai import OpenAI
@@ -18,6 +19,120 @@ FALLBACK_MODEL = "anthropic/claude-3-haiku"
 
 # Valid system verdicts for validation
 VALID_VERDICTS = {"real", "likely", "fake", "suspicious", "unconfirmed"}
+
+# Path to the trusted domains JSON file (relative to this module)
+_TRUSTED_DOMAINS_JSON_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "trusted_domains.json"
+)
+
+# In-memory cache for the loaded JSON
+_trusted_domains_cache = None
+
+
+def _load_trusted_domains() -> dict:
+    """
+    Load the trusted_domains.json file once and cache it.
+
+    Returns:
+        Dict with keys: domains, trusted_suffixes, certified_facebook_pages,
+        cameroon_keywords, government_tlds, official_presidential_domains,
+        tier1_news_agencies, tier1_african_news
+    """
+    global _trusted_domains_cache
+    if _trusted_domains_cache is not None:
+        return _trusted_domains_cache
+
+    try:
+        with open(_TRUSTED_DOMAINS_JSON_PATH, "r", encoding="utf-8") as f:
+            _trusted_domains_cache = json.load(f)
+        logger.info(f"Loaded trusted_domains.json from {_TRUSTED_DOMAINS_JSON_PATH}")
+    except FileNotFoundError:
+        logger.warning(f"trusted_domains.json not found at {_TRUSTED_DOMAINS_JSON_PATH}, using defaults")
+        _trusted_domains_cache = _default_trusted_domains()
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse trusted_domains.json: {e}, using defaults")
+        _trusted_domains_cache = _default_trusted_domains()
+
+    return _trusted_domains_cache
+
+
+def _default_trusted_domains() -> dict:
+    """Return a minimal default trusted domains config if JSON is missing."""
+    return {
+        "domains": [
+            "reuters.com", "apnews.com", "bbc.com", "nytimes.com",
+            "whitehouse.gov", "state.gov", "prc.cm"
+        ],
+        "trusted_suffixes": ["org", ".gov", "edu", "int"],
+        "certified_facebook_pages": [],
+        "cameroon_keywords": ["cameroon", "cameroun", "yaounde"],
+        "government_tlds": [".gov", ".gov.cm", ".gouv", ".gouv.fr"],
+        "official_presidential_domains": ["prc.cm", "presidence.cm", "whitehouse.gov"],
+        "tier1_news_agencies": ["reuters.com", "apnews.com", "afp.com", "bbc.com"],
+        "tier1_african_news": ["jeuneafrique.com", "africanews.com", "cameroon-tribune.cm"],
+    }
+
+
+def _get_credible_domains() -> list:
+    """
+    Build the list of credible domains from trusted_domains.json.
+    Combines: domains + official_presidential_domains + tier1_news_agencies + tier1_african_news.
+
+    Returns:
+        List of credible domain strings.
+    """
+    config = _load_trusted_domains()
+
+    all_credible = []
+    seen = set()
+
+    # Combine all domain lists from the JSON
+    for key in ["domains", "official_presidential_domains", "tier1_news_agencies", "tier1_african_news"]:
+        domains = config.get(key, [])
+        if isinstance(domains, list):
+            for d in domains:
+                if d not in seen:
+                    seen.add(d)
+                    all_credible.append(d)
+
+    return all_credible
+
+
+def _get_government_domains() -> list:
+    """Return official government/presidential domains from JSON."""
+    config = _load_trusted_domains()
+    return list(config.get("official_presidential_domains", []))
+
+
+def _get_tier1_news_domains() -> list:
+    """Return tier 1 international news agency domains from JSON."""
+    config = _load_trusted_domains()
+    return list(config.get("tier1_news_agencies", []))
+
+
+def _get_tier1_african_domains() -> list:
+    """Return tier 1 African news domains from JSON."""
+    config = _load_trusted_domains()
+    return list(config.get("tier1_african_news", []))
+
+
+def _credible_source_cited_in_evidence(parsed: dict) -> bool:
+    """
+    Check if the LLM actually cited a credible source in its own reasoning.
+    This prevents upgrading verdicts when a credible source is present in the
+    search results but does NOT actually confirm the claim.
+    """
+    credible_domains = _get_credible_domains()
+    text_to_check = " ".join([
+        parsed.get("explanation", ""),
+        *parsed.get("key_evidence", []),
+    ]).lower()
+
+    for domain in credible_domains:
+        if domain in text_to_check:
+            return True
+    return False
 
 
 def get_openrouter_client() -> OpenAI:
@@ -49,6 +164,12 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
     Returns:
         String prompt
     """
+    # Load domain categories from JSON for consistent source typing
+    govt_domains = _get_government_domains()
+    tier1_news = _get_tier1_news_domains()
+    tier1_african = _get_tier1_african_domains()
+    all_credible = _get_credible_domains()
+
     # Build candidates section using StringIO for efficient string concatenation
     candidates_buffer = StringIO()
     for i, c in enumerate(top_candidates[:10], 1):
@@ -58,13 +179,15 @@ def build_analysis_prompt(query, top_candidates, timeline, statistics, rules_ass
         title = c.get("title", "No title")
         engine = c.get("engine", "unknown")
 
-        # Identify source type for the prompt — simplified credibility markers
+        # Identify source type using the JSON config
         source_type = "other"
-        if domain in {'prc.cm', 'presidence.cm', 'kremlin.ru', 'elysee.fr', 'whitehouse.gov', 'state.gov'}:
+        if domain in govt_domains:
             source_type = "GOVERNMENT"
-        elif domain in {'reuters.com', 'apnews.com', 'afp.com', 'afp.fr', 'bbc.com', 'bbc.co.uk', 'france24.com', 'rfi.fr'}:
+        elif domain in tier1_news:
             source_type = "MAJOR_NEWS"
-        elif domain in {'jeuneafrique.com', 'africanews.com', 'cameroon-tribune.cm', 'crtv.cm', 'journalducameroun.com', 'actucameroun.com'}:
+        elif domain in tier1_african:
+            source_type = "CREDIBLE_LOCAL_NEWS"
+        elif domain in all_credible:
             source_type = "CREDIBLE_LOCAL_NEWS"
 
         crawl_data = c.get("crawl_data") or {}
@@ -311,12 +434,13 @@ def _detect_crawl_anomalies(top_candidates) -> list:
     return anomalies
 
 
-def analyze_with_openrouter(prompt: str, model: str = None) -> tuple:
+def analyze_with_openrouter(prompt: str, statistics: dict = None, model: str = None) -> tuple:
     """
     Send prompt to OpenRouter and return parsed response with a fallback mechanism.
 
     Args:
         prompt: The full LLM prompt string
+        statistics: Structured statistics dict for post-processing (fixes overcautious verdicts)
         model: Model string, e.g. "openai/gpt-4o-mini"
 
     Returns:
@@ -350,8 +474,8 @@ def analyze_with_openrouter(prompt: str, model: str = None) -> tuple:
 
         parsed = _parse_llm_response(raw_content)
 
-        # Post-process to catch overcautious verdicts
-        parsed = _fix_overcautious_verdict(parsed, prompt)
+        # Post-process to catch overcautious verdicts — pass structured data, not prompt text
+        parsed = _fix_overcautious_verdict(parsed, statistics or {})
 
         return parsed, raw_response
 
@@ -362,51 +486,48 @@ def analyze_with_openrouter(prompt: str, model: str = None) -> tuple:
         if model != FALLBACK_MODEL:
             logger.info(f"Falling back to {FALLBACK_MODEL}...")
             try:
-                return analyze_with_openrouter(prompt, model=FALLBACK_MODEL)
+                return analyze_with_openrouter(prompt, statistics=statistics, model=FALLBACK_MODEL)
             except Exception as fallback_err:
                 logger.error(f"Fallback also failed: {str(fallback_err)}")
 
         return _default_verdict(), {"error": str(e)}
 
 
-def _fix_overcautious_verdict(parsed: dict, prompt: str) -> dict:
+def _fix_overcautious_verdict(parsed: dict, statistics: dict) -> dict:
     """
     Post-process LLM verdicts to fix logical inconsistencies.
 
+    Uses structured statistics data instead of scraping the prompt string,
+    and only upgrades when the LLM actually cited a credible source in its reasoning.
+
     Rules:
-      1. If ANY credible source (govt, major news, local) is present and the
-         verdict is cautious (unconfirmed / suspicious / likely), upgrade to 'real'.
+      1. If a credible source is present AND the LLM actually cited it in
+         key_evidence/explanation AND the verdict is "unconfirmed" or "suspicious",
+         upgrade to "real".
       2. If NO credible source is found but at least 3 different sources
-         corroborate the claim (total_sources >= 3), upgrade to 'likely'.
+         corroborate the claim (total_sources >= 3), upgrade to "likely".
     """
     verdict = parsed.get("verdict", "unconfirmed")
     explanation = parsed.get("explanation", "")
 
-    prompt_lower = prompt.lower()
-
-    # Determine what credible sources are present in the prompt
-    has_govt_source = "government source" in prompt_lower or "government/presidential" in prompt_lower
-    has_major_news = "major news agency" in prompt_lower or "news agency" in prompt_lower
-    has_credible_local = "credible local news" in prompt_lower
+    # Use structured statistics instead of scraping prompt text
+    has_govt_source = statistics.get("government_sources", 0) > 0
+    has_major_news = statistics.get("tier1_news_sources", 0) > 0
+    has_credible_local = statistics.get("credible_local_news_sources", 0) > 0
     has_any_credible_source = has_govt_source or has_major_news or has_credible_local
+    total_sources = statistics.get("total_sources", 0)
 
-    # Extract total source count from the Statistics section
-    import re
-    total_sources = 0
-    match = re.search(r"- Total sources found:\s*(\d+)", prompt)
-    if match:
-        total_sources = int(match.group(1))
-
-    # Rule 1: Credible source exists + overcautious verdict → upgrade to "real"
-    if has_any_credible_source and verdict in ("unconfirmed", "suspicious", "likely"):
+    # Rule 1: Credible source exists + LLM actually cited it + overcautious verdict → upgrade to "real"
+    # Only targets "unconfirmed" and "suspicious" — "likely" is intentionally cautious, not a bug
+    if has_any_credible_source and _credible_source_cited_in_evidence(parsed)             and verdict in ("unconfirmed", "suspicious"):
         logger.warning(
-            f"Overcautious verdict: '{verdict}' despite credible source present. "
+            f"Overcautious verdict: '{verdict}' despite credible source cited in evidence. "
             f"Upgrading to 'real'."
         )
         parsed["verdict"] = "real"
         parsed["explanation"] = explanation + (
             " [SYSTEM NOTE: Verdict upgraded to 'real' because credible sources "
-            "confirming the claim were present in the evidence.]"
+            "confirming the claim were present in the evidence."
         )
 
     # Rule 2: No credible source but ≥ 3 sources corroborate → upgrade to "likely"

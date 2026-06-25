@@ -21,5 +21,13 @@ else:
 "
 fi
 
+# If the command is "celery", run celery worker instead of gunicorn
+if [ "$1" = "celery" ]; then
+    echo "→ Starting celery worker..."
+    # Pass through any additional celery arguments from docker compose command
+    shift
+    exec celery -A _Project "$@"
+fi
+
 echo "→ Starting gunicorn..."
 exec gunicorn '_Project.wsgi' --bind=0.0.0.0:8000 --workers=4 --timeout=120

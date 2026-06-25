@@ -17,6 +17,9 @@ from .research_generator import (
     _fallback_report,
     _empty_report,
     _parse_llm_response,
+    run_searxng_searches,
+    compile_research_with_llm,
+    generate_research_report,
 )
 from .llm_research_prompt import build_research_prompt
 
@@ -355,3 +358,192 @@ class BuildResearchPromptTests(SimpleTestCase):
         """Prompt should include the mapped verdict."""
         prompt = build_research_prompt("claim", "real", 0.75, "explanation", {"general": [], "images": [], "videos": []}, ["q1"])
         self.assertIn("TRUE", prompt)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  run_searxng_searches Tests
+# ═══════════════════════════════════════════════════════════════
+
+class RunSearxngSearchesTests(SimpleTestCase):
+    """Tests for run_searxng_searches()."""
+
+    @patch("discover.research_generator.search_general")
+    @patch("discover.research_generator.search_images")
+    @patch("discover.research_generator.search_videos")
+    def test_aggregates_all_categories(self, mock_videos, mock_images, mock_general):
+        """Should aggregate general, images, and videos from multiple queries."""
+        mock_general.return_value = [
+            {"url": "https://ex.com/1", "title": "R1"},
+            {"url": "https://ex.com/2", "title": "R2"},
+        ]
+        mock_images.return_value = [
+            {"source_url": "https://img.com/1", "title": "I1"},
+        ]
+        mock_videos.return_value = [
+            {"url": "https://vid.com/1", "title": "V1"},
+        ]
+
+        result = run_searxng_searches(["query1", "query2"])
+        self.assertEqual(len(result["general"]), 2)
+        self.assertEqual(len(result["images"]), 1)
+        self.assertEqual(len(result["videos"]), 1)
+
+    @patch("discover.research_generator.search_general")
+    @patch("discover.research_generator.search_images")
+    @patch("discover.research_generator.search_videos")
+    def test_deduplicates_general_by_url(self, mock_videos, mock_images, mock_general):
+        """Duplicate URLs should be deduplicated."""
+        mock_general.return_value = [
+            {"url": "https://ex.com/dup", "title": "Same"},
+        ]
+        mock_images.return_value = []
+        mock_videos.return_value = []
+
+        result = run_searxng_searches(["q1", "q2"])
+        self.assertEqual(len(result["general"]), 1)
+
+    @patch("discover.research_generator.search_general")
+    @patch("discover.research_generator.search_images")
+    @patch("discover.research_generator.search_videos")
+    def test_empty_queries(self, mock_videos, mock_images, mock_general):
+        """Empty queries should produce empty results."""
+        mock_general.return_value = []
+        mock_images.return_value = []
+        mock_videos.return_value = []
+
+        result = run_searxng_searches([])
+        self.assertEqual(len(result["general"]), 0)
+        self.assertEqual(len(result["images"]), 0)
+        self.assertEqual(len(result["videos"]), 0)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  compile_research_with_llm Tests
+# ═══════════════════════════════════════════════════════════════
+
+class CompileResearchWithLlmTests(SimpleTestCase):
+    """Tests for compile_research_with_llm()."""
+
+    @patch("discover.research_generator.settings")
+    @patch("discover.research_generator.OpenAI")
+    def test_successful_compilation(self, mock_openai, mock_settings):
+        """Successful LLM call should return parsed report."""
+        mock_settings.OPENROUTER_API_KEY = "test-key"
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = json.dumps({
+            "summary": "Research summary",
+            "additional_context": "Extra context",
+            "reality_check": "Reality check",
+        })
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[mock_choice]
+        )
+        mock_openai.return_value = mock_client
+
+        result = compile_research_with_llm(
+            claim="test claim",
+            verdict="fake",
+            confidence=0.85,
+            explanation="Explanation",
+            search_results={"general": [], "images": [], "videos": []},
+            generated_queries=["q1"],
+        )
+        self.assertEqual(result["summary"], "Research summary")
+        self.assertEqual(result["additional_context"], "Extra context")
+
+    @patch("discover.research_generator.settings")
+    def test_no_api_key_returns_fallback(self, mock_settings):
+        """Missing API key should return fallback report."""
+        mock_settings.OPENROUTER_API_KEY = ""
+        result = compile_research_with_llm(
+            claim="test", verdict="real", confidence=0.9,
+            explanation="E", search_results={"general": [], "images": [], "videos": []},
+            generated_queries=["q1"],
+        )
+        self.assertIn("summary", result)
+        self.assertIn("TRUE", result["summary"])
+
+    @patch("discover.research_generator.settings")
+    @patch("discover.research_generator.OpenAI")
+    def test_primary_fails_falls_back(self, mock_openai, mock_settings):
+        """When primary model fails, should fall back to secondary."""
+        mock_settings.OPENROUTER_API_KEY = "test-key"
+        mock_client = MagicMock()
+        # Both calls fail
+        mock_client.chat.completions.create.side_effect = Exception("Model failed")
+        mock_openai.return_value = mock_client
+
+        result = compile_research_with_llm(
+            claim="test", verdict="fake", confidence=0.8,
+            explanation="E", search_results={"general": [], "images": [], "videos": []},
+            generated_queries=["q1"],
+        )
+        # Should return fallback on total failure
+        self.assertIn("summary", result)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  generate_research_report Tests
+# ═══════════════════════════════════════════════════════════════
+
+class GenerateResearchReportTests(SimpleTestCase):
+    """Tests for generate_research_report()."""
+
+    # The full test requires mocking search functions, so we test the early-exit case
+    @patch("discover.research_generator.run_searxng_searches")
+    @patch("discover.research_generator.compile_research_with_llm")
+    def test_generate_report(self, mock_compile, mock_searxng):
+        """generate_research_report should return queries, report, sources."""
+        mock_searxng.return_value = {
+            "general": [{"url": "https://ex.com", "title": "R1", "domain": "ex.com", "snippet": "Snippet"}],
+            "images": [{"source_url": "https://img.com/1", "thumbnail_url": "", "title": "I1"}],
+            "videos": [{"url": "https://vid.com/1", "title": "V1", "thumbnail_url": "", "domain": "youtube"}],
+        }
+        mock_compile.return_value = {
+            "summary": "Research summary",
+            "additional_context": None,
+            "reality_check": "Reality check",
+        }
+
+        websearch = MagicMock()
+        websearch.query = "test claim"
+        robot_analysis = {
+            "verdict": "fake",
+            "confidence": 0.85,
+            "explanation": "Explanation",
+            "key_evidence": ["Evidence 1"],
+        }
+
+        queries, report, sources, images, videos = generate_research_report(
+            websearch, robot_analysis, {}
+        )
+        self.assertEqual(len(queries), 3)
+        self.assertEqual(report["summary"], "Research summary")
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(len(videos), 1)
+
+    def test_empty_claim_returns_empty(self):
+        """Empty claim should return empty results."""
+        websearch = MagicMock()
+        websearch.query = ""
+        robot_analysis = {"verdict": "fake", "confidence": 0.8, "explanation": "E", "key_evidence": []}
+
+        queries, report, sources, images, videos = generate_research_report(
+            websearch, robot_analysis, {}
+        )
+        self.assertEqual(queries, [])
+        self.assertEqual(report["summary"], "")
+        self.assertEqual(sources, [])
+        self.assertEqual(images, [])
+        self.assertEqual(videos, [])
+
+
+# ═══════════════════════════════════════════════════════════════
+#  (Celery task run_research_generation is tested indirectly
+#   through the view tests above, which mock task.delay().
+#   Direct task execution requires a Celery backend, so
+#   the business logic (caching, report generation) is
+#   covered by the GenerateResearchReportTests and views.)
+# ═══════════════════════════════════════════════════════════════

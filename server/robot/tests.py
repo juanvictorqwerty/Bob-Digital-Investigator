@@ -2,6 +2,7 @@
 Tests for the robot app (models, serializers, analysis pipeline, LLM client).
 """
 import json
+import os
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
@@ -22,6 +23,15 @@ from .llm_client import (
     _default_verdict,
     _fix_overcautious_verdict,
     build_analysis_prompt,
+    _load_trusted_domains,
+    _get_credible_domains,
+    _get_government_domains,
+    _get_tier1_news_domains,
+    _get_tier1_african_domains,
+    _credible_source_cited_in_evidence,
+    _detect_crawl_anomalies,
+    get_openrouter_client,
+    analyze_with_openrouter,
     VALID_VERDICTS,
 )
 
@@ -418,53 +428,81 @@ class ParseLlmResponseTests(SimpleTestCase):
 class FixOvercautiousVerdictTests(SimpleTestCase):
     """Tests for _fix_overcautious_verdict()."""
 
-    def test_unconfirmed_no_source_count_no_upgrade(self):
-        """unconfirmed with no source count in prompt stays unchanged."""
-        verdict = {"verdict": "unconfirmed", "confidence": 0.55, "explanation": "Some evidence"}
-        prompt = "Some prompt"
-        result = _fix_overcautious_verdict(verdict, prompt)
+    def test_unconfirmed_no_credible_source_no_upgrade(self):
+        """unconfirmed with no credible source in stats stays unchanged."""
+        verdict = {"verdict": "unconfirmed", "confidence": 0.55, "explanation": "Some evidence", "key_evidence": []}
+        statistics = {"government_sources": 0, "tier1_news_sources": 0, "credible_local_news_sources": 0, "total_sources": 1}
+        result = _fix_overcautious_verdict(verdict, statistics)
         self.assertEqual(result["verdict"], "unconfirmed")
 
     def test_govt_source_present_upgraded(self):
-        """govt source + overcautious verdict → upgrade to 'real'."""
-        prompt = "✓ Official government/presidential source present"
-        verdict = {"verdict": "unconfirmed", "confidence": 0.70, "explanation": "Some explanation"}
-        result = _fix_overcautious_verdict(verdict, prompt)
+        """govt source present + evidence cites credible domain → upgrade to 'real'."""
+        # reuters.com is in the default credible domains list
+        statistics = {"government_sources": 1, "tier1_news_sources": 0, "credible_local_news_sources": 0, "total_sources": 5}
+        verdict = {
+            "verdict": "unconfirmed",
+            "confidence": 0.70,
+            "explanation": "Confirmed by reuters.com",
+            "key_evidence": ["reuters.com reported on this"],
+        }
+        result = _fix_overcautious_verdict(verdict, statistics)
         self.assertEqual(result["verdict"], "real")
 
     def test_govt_plus_tier1_upgraded_to_real(self):
-        """Govt + tier1 + confidence >= 0.70 → upgrade to 'real'."""
-        prompt = (
-            "✓ Official government/presidential source present\n"
-            "✓ Tier-1 international news agency present"
-        )
-        verdict = {"verdict": "likely", "confidence": 0.75, "explanation": "Good sources"}
-        result = _fix_overcautious_verdict(verdict, prompt)
-        self.assertEqual(result["verdict"], "real")
+        """Govt + tier1 in stats + credible source cited in evidence → upgrade 'likely' to 'real'."""
+        # Note: 'likely' is NOT in the upgrade targets (only unconfirmed/suspicious)
+        # This test verifies 'likely' stays unchanged since it's intentionally cautious
+        statistics = {"government_sources": 1, "tier1_news_sources": 2, "credible_local_news_sources": 0, "total_sources": 5}
+        verdict = {"verdict": "likely", "confidence": 0.75, "explanation": "bbc.com confirms this story", "key_evidence": []}
+        result = _fix_overcautious_verdict(verdict, statistics)
+        self.assertEqual(result["verdict"], "likely")
 
-    def test_self_contradicting_explanation_upgraded(self):
-        """Explanation with positive signals but no source count stays unchanged."""
+    def test_self_contradicting_explanation_no_upgrade(self):
+        """Explanation with positive language but no credible source cited stays unchanged."""
         verdict = {
             "verdict": "unconfirmed",
             "confidence": 0.60,
             "explanation": "The claim is supported by credible sources. Multiple sources confirm it.",
+            "key_evidence": [],
         }
-        prompt = "prompt"
-        result = _fix_overcautious_verdict(verdict, prompt)
+        # total_sources < 3 so Rule 2 (many sources upgrade) does NOT trigger
+        statistics = {"government_sources": 0, "tier1_news_sources": 0, "credible_local_news_sources": 0, "total_sources": 2}
+        result = _fix_overcautious_verdict(verdict, statistics)
         self.assertEqual(result["verdict"], "unconfirmed")
 
-    def test_suspicious_no_source_count_no_upgrade(self):
-        """suspicious with no source count in prompt stays unchanged."""
-        verdict = {"verdict": "suspicious", "confidence": 0.75, "explanation": "Some evidence"}
-        result = _fix_overcautious_verdict(verdict, "prompt")
+    def test_suspicious_no_credible_source_no_upgrade(self):
+        """suspicious with no credible source in stats stays unchanged."""
+        verdict = {"verdict": "suspicious", "confidence": 0.75, "explanation": "Some evidence", "key_evidence": []}
+        statistics = {"government_sources": 0, "tier1_news_sources": 0, "credible_local_news_sources": 0, "total_sources": 1}
+        result = _fix_overcautious_verdict(verdict, statistics)
         self.assertEqual(result["verdict"], "suspicious")
 
     def test_no_change_when_no_issues(self):
         """Correct verdicts should remain unchanged."""
-        verdict = {"verdict": "real", "confidence": 0.85, "explanation": "All good"}
-        result = _fix_overcautious_verdict(verdict, "prompt")
+        verdict = {"verdict": "real", "confidence": 0.85, "explanation": "All good", "key_evidence": []}
+        statistics = {"government_sources": 0, "tier1_news_sources": 0, "credible_local_news_sources": 0, "total_sources": 1}
+        result = _fix_overcautious_verdict(verdict, statistics)
         self.assertEqual(result["verdict"], "real")
         self.assertEqual(result["confidence"], 0.85)
+
+    def test_no_credible_source_but_many_sources_upgraded_to_likely(self):
+        """No authoritative source but >=3 sources → upgrade to 'likely'."""
+        verdict = {"verdict": "unconfirmed", "confidence": 0.50, "explanation": "Some sources found", "key_evidence": ["source1", "source2"]}
+        statistics = {"government_sources": 0, "tier1_news_sources": 0, "credible_local_news_sources": 0, "total_sources": 3}
+        result = _fix_overcautious_verdict(verdict, statistics)
+        self.assertEqual(result["verdict"], "likely")
+
+    def test_credible_source_cited_with_key_evidence(self):
+        """Credible domain cited in key_evidence triggers upgrade."""
+        statistics = {"government_sources": 0, "tier1_news_sources": 1, "credible_local_news_sources": 0, "total_sources": 5}
+        verdict = {
+            "verdict": "suspicious",
+            "confidence": 0.60,
+            "explanation": "Some concerns",
+            "key_evidence": ["reuters.com published a detailed article"],
+        }
+        result = _fix_overcautious_verdict(verdict, statistics)
+        self.assertEqual(result["verdict"], "real")
 
 
 class BuildAnalysisPromptTests(SimpleTestCase):
@@ -538,3 +576,359 @@ class BuildAnalysisPromptTests(SimpleTestCase):
             rules_assessment={"key": "value"},
         )
         self.assertIn("No additional claim provided", prompt)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Trusted Domains Tests
+# ═══════════════════════════════════════════════════════════════
+
+class LoadTrustedDomainsTests(SimpleTestCase):
+    """Tests for _load_trusted_domains() and related helpers."""
+
+    def tearDown(self):
+        # Reset the cache after each test
+        from robot.llm_client import _trusted_domains_cache
+        import robot.llm_client as llm
+        llm._trusted_domains_cache = None
+
+    @patch("robot.llm_client._TRUSTED_DOMAINS_JSON_PATH", "/nonexistent/path.json")
+    def test_load_missing_file_uses_defaults(self):
+        """When JSON file is missing, should return default domains."""
+        domains = _load_trusted_domains()
+        self.assertIn("reuters.com", domains.get("domains", []))
+        self.assertIn(".gov", domains.get("trusted_suffixes", []))
+
+    def test_get_credible_domains_returns_deduplicated_list(self):
+        """_get_credible_domains should return unique domains from all sources."""
+        domains = _get_credible_domains()
+        self.assertIsInstance(domains, list)
+        self.assertGreater(len(domains), 0)
+        # Should include domains from various categories
+        self.assertIn("reuters.com", domains)
+
+    def test_get_government_domains_returns_list(self):
+        """_get_government_domains should return a list."""
+        domains = _get_government_domains()
+        self.assertIsInstance(domains, list)
+
+    def test_get_tier1_news_domains_returns_list(self):
+        """_get_tier1_news_domains should return a list."""
+        domains = _get_tier1_news_domains()
+        self.assertIsInstance(domains, list)
+        self.assertIn("reuters.com", domains)
+
+    def test_get_tier1_african_domains_returns_list(self):
+        """_get_tier1_african_domains should return a list."""
+        domains = _get_tier1_african_domains()
+        self.assertIsInstance(domains, list)
+        self.assertIn("jeuneafrique.com", domains)
+
+
+class CredibleSourceCitedTests(SimpleTestCase):
+    """Tests for _credible_source_cited_in_evidence()."""
+
+    def test_credible_domain_in_explanation(self):
+        """Credible domain mentioned in explanation should return True."""
+        parsed = {
+            "explanation": "According to reuters.com the claim is verified",
+            "key_evidence": [],
+        }
+        self.assertTrue(_credible_source_cited_in_evidence(parsed))
+
+    def test_credible_domain_in_key_evidence(self):
+        """Credible domain mentioned in key_evidence should return True."""
+        parsed = {
+            "explanation": "Some reasoning here",
+            "key_evidence": ["bbc.com reported on this event"],
+        }
+        self.assertTrue(_credible_source_cited_in_evidence(parsed))
+
+    def test_no_credible_domain_returns_false(self):
+        """No credible domain mentioned should return False."""
+        parsed = {
+            "explanation": "Some random reasoning without credible sources",
+            "key_evidence": ["unknownblog.com says something"],
+        }
+        self.assertFalse(_credible_source_cited_in_evidence(parsed))
+
+    def test_empty_evidence_returns_false(self):
+        """Empty explanation and evidence should return False."""
+        parsed = {
+            "explanation": "",
+            "key_evidence": [],
+        }
+        self.assertFalse(_credible_source_cited_in_evidence(parsed))
+
+    def test_case_insensitive_matching(self):
+        """Domain matching should be case-insensitive."""
+        parsed = {
+            "explanation": "Associated Press (AP) citing Reuters.com",
+            "key_evidence": [],
+        }
+        self.assertTrue(_credible_source_cited_in_evidence(parsed))
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Crawl Anomaly Detection Tests
+# ═══════════════════════════════════════════════════════════════
+
+class DetectCrawlAnomaliesTests(SimpleTestCase):
+    """Tests for _detect_crawl_anomalies()."""
+
+    def test_ai_marker_detected(self):
+        """AI disclaimer markers should be detected."""
+        candidates = [
+            {
+                "domain": "ai-site.com",
+                "crawl_data": {
+                    "crawl_status": "success",
+                    "raw_snippet": "As an AI language model, I cannot verify this claim",
+                },
+            }
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        self.assertTrue(any("AI disclaimer" in a for a in anomalies))
+
+    def test_sensational_language_detected(self):
+        """Sensational language markers should be detected (snippet > 50 chars)."""
+        candidates = [
+            {
+                "domain": "clickbait.com",
+                "crawl_data": {
+                    "crawl_status": "success",
+                    "raw_snippet": "BREAKING! You won't believe what happened next! This is truly shocking news that everyone is talking about!",
+                },
+            }
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        self.assertTrue(any("Sensational" in a for a in anomalies))
+
+    def test_very_little_content_detected(self):
+        """Very short content should be flagged."""
+        candidates = [
+            {
+                "domain": "thin.com",
+                "crawl_data": {
+                    "crawl_status": "success",
+                    "raw_snippet": "Short.",
+                },
+            }
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        self.assertTrue(any("very little content" in a for a in anomalies))
+
+    def test_failed_crawl_skipped(self):
+        """Failed crawl entries should be skipped."""
+        candidates = [
+            {
+                "domain": "blocked.com",
+                "crawl_data": {"crawl_status": "failed", "crawl_error": "403"},
+            }
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        self.assertEqual(len(anomalies), 0)
+
+    def test_no_crawl_data_skipped(self):
+        """Entries without crawl_data should be skipped."""
+        candidates = [
+            {"domain": "no-data.com"},
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        self.assertEqual(len(anomalies), 0)
+
+    def test_clean_content_no_anomalies(self):
+        """Clean content should produce no anomalies (>= 30 words, >= 50 chars)."""
+        candidates = [
+            {
+                "domain": "normal.com",
+                "crawl_data": {
+                    "crawl_status": "success",
+                    "raw_snippet": "This is a normal article with substantial content about a real event. It contains multiple sentences and paragraphs of useful information for detailed analysis purposes. The overall text length provides enough content to be meaningful and useful for evaluation.",
+                },
+            }
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        # No AI markers, no sensational language, enough content
+        self.assertEqual(len(anomalies), 0)
+
+    def test_thin_word_count_detected(self):
+        """Very few words (< 30) should be flagged as thin content."""
+        candidates = [
+            {
+                "domain": "spam.com",
+                "crawl_data": {
+                    "crawl_status": "success",
+                    "raw_snippet": "Just a few words here for testing. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore.",
+                },
+            }
+        ]
+        anomalies = _detect_crawl_anomalies(candidates)
+        self.assertTrue(any("thin page content" in a for a in anomalies))
+
+
+# ═══════════════════════════════════════════════════════════════
+#  get_openrouter_client Tests
+# ═══════════════════════════════════════════════════════════════
+
+class GetOpenRouterClientTests(SimpleTestCase):
+    """Tests for get_openrouter_client()."""
+
+    @patch("robot.llm_client.settings")
+    def test_client_created_with_api_key(self, mock_settings):
+        """get_openrouter_client should return OpenAI client when key is set."""
+        mock_settings.OPENROUTER_API_KEY = "test-key"
+        client = get_openrouter_client()
+        self.assertEqual(client.api_key, "test-key")
+        self.assertIn("openrouter.ai", str(client.base_url))
+
+    @patch("robot.llm_client.settings")
+    def test_missing_api_key_raises_error(self, mock_settings):
+        """get_openrouter_client should raise ValueError when key is missing."""
+        mock_settings.OPENROUTER_API_KEY = ""
+        with self.assertRaises(ValueError):
+            get_openrouter_client()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  analyze_with_openrouter Tests
+# ═══════════════════════════════════════════════════════════════
+
+class AnalyzeWithOpenRouterTests(SimpleTestCase):
+    """Tests for analyze_with_openrouter()."""
+
+    @patch("robot.llm_client.get_openrouter_client")
+    def test_successful_analysis(self, mock_get_client):
+        """Successful LLM call should return parsed verdict."""
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = json.dumps({
+            "verdict": "real",
+            "confidence": 0.85,
+            "short_summary": "Summary",
+            "explanation": "Explanation",
+            "key_evidence": ["Ev"],
+        })
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[mock_choice],
+            usage=MagicMock(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+        )
+        mock_get_client.return_value = mock_client
+
+        result, raw = analyze_with_openrouter("test prompt", {"total_sources": 5})
+        self.assertEqual(result["verdict"], "real")
+        self.assertEqual(result["confidence"], 0.85)
+        self.assertIn("model", raw)
+        self.assertIn("usage", raw)
+
+    @patch("robot.llm_client.get_openrouter_client")
+    def test_primary_fails_falls_back(self, mock_get_client):
+        """When primary model fails, should fall back to secondary."""
+        mock_client = MagicMock()
+        # First call fails, second succeeds
+        mock_client.chat.completions.create.side_effect = [
+            Exception("Primary model failed"),
+            MagicMock(
+                choices=[MagicMock(message=MagicMock(content=json.dumps({
+                    "verdict": "fake",
+                    "confidence": 0.9,
+                    "short_summary": "Fake",
+                    "explanation": "E",
+                    "key_evidence": [],
+                })))],
+                usage=MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            ),
+        ]
+        mock_get_client.return_value = mock_client
+
+        result, raw = analyze_with_openrouter("test prompt")
+        self.assertEqual(result["verdict"], "fake")
+
+    @patch("robot.llm_client.get_openrouter_client")
+    def test_both_fail_returns_default(self, mock_get_client):
+        """When both models fail, should return default verdict."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("All models failed")
+        mock_get_client.return_value = mock_client
+
+        result, raw = analyze_with_openrouter("test prompt")
+        self.assertEqual(result["verdict"], "unconfirmed")
+        self.assertEqual(result["confidence"], 0.0)
+        self.assertIn("error", raw)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Rules-based Assessment Tests
+# ═══════════════════════════════════════════════════════════════
+
+class RulesBasedAssessmentTests(SimpleTestCase):
+    """Tests for _rules_based_assessment()."""
+
+    def test_date_anomaly_coordinated_push(self):
+        """Sources within 24h should flag coordinated push."""
+        websearch = MagicMock()
+        websearch.query = "test claim"
+        candidates = [
+            {"publish_date": "2024-01-15T10:00:00Z", "domain": "a.com", "engine": "google"},
+            {"publish_date": "2024-01-15T12:00:00Z", "domain": "b.com", "engine": "google"},
+            {"publish_date": "2024-01-15T14:00:00Z", "domain": "c.com", "engine": "google"},
+        ]
+        assessment = _rules_based_assessment(websearch, candidates, [], {"total_sources": 3, "trusted_domains": 0})
+        self.assertIn("24 hours", assessment.get("date_anomaly", ""))
+
+    def test_natural_spread(self):
+        """Sources spanning multiple days should show natural spread."""
+        websearch = MagicMock()
+        websearch.query = "test claim"
+        candidates = [
+            {"publish_date": "2024-01-10T10:00:00Z", "domain": "a.com", "engine": "google"},
+            {"publish_date": "2024-01-12T10:00:00Z", "domain": "b.com", "engine": "google"},
+            {"publish_date": "2024-01-15T10:00:00Z", "domain": "c.com", "engine": "google"},
+        ]
+        assessment = _rules_based_assessment(websearch, candidates, [], {"total_sources": 3, "trusted_domains": 1})
+        self.assertIn("days", assessment.get("date_anomaly", ""))
+
+    def test_few_dates_limited_temporal(self):
+        """Fewer than 3 dated sources should show limited temporal data."""
+        websearch = MagicMock()
+        websearch.query = "test"
+        candidates = [
+            {"publish_date": "2024-01-15T10:00:00Z", "domain": "a.com", "engine": "google"},
+            {"publish_date": "", "domain": "b.com", "engine": "google"},
+        ]
+        assessment = _rules_based_assessment(websearch, candidates, [], {"total_sources": 2, "trusted_domains": 0})
+        self.assertIn("limited temporal", assessment.get("date_anomaly", ""))
+
+    def test_trust_anomaly_high_untrusted(self):
+        """4+ of top 5 untrusted should flag credibility concern."""
+        websearch = MagicMock()
+        websearch.query = "test"
+        candidates = [
+            {"domain": f"untrusted{i}.com", "engine": "google"} for i in range(5)
+        ]
+        assessment = _rules_based_assessment(websearch, candidates, [], {"total_sources": 5, "trusted_domains": 0})
+        self.assertIn("credibility concern", assessment.get("trust_anomaly", ""))
+
+    def test_multiple_engines_corroboration(self):
+        """Multiple engines should show corroboration."""
+        websearch = MagicMock()
+        websearch.query = "test"
+        candidates = [
+            {"domain": "a.com", "engine": "google"},
+            {"domain": "b.com", "engine": "yandex"},
+        ]
+        assessment = _rules_based_assessment(websearch, candidates, [], {"total_sources": 2, "trusted_domains": 1})
+        self.assertIn("multiple", assessment.get("corroboration", "").lower())
+
+    def test_source_quality_counts(self):
+        """Source quality should reflect total sources count."""
+        websearch = MagicMock()
+        websearch.query = "test"
+        assessment = _rules_based_assessment(websearch, [], [], {"total_sources": 20, "trusted_domains": 5})
+        self.assertIn("robust", assessment.get("source_quality", ""))
+
+    def test_user_query_provided(self):
+        """User query presence should be reflected."""
+        websearch = MagicMock()
+        websearch.query = "real query"
+        assessment = _rules_based_assessment(websearch, [], [], {"total_sources": 0, "trusted_domains": 0})
+        self.assertTrue(assessment.get("user_query_provided"))

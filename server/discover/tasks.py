@@ -165,10 +165,19 @@ def run_research_generation(self, analysis_id):
             }
         )
 
-        # Include additional sources, images, and videos alongside the LLM summary
-        report['additional_sources'] = additional_sources
+        # Rename additional_sources → sources to match the frontend's expected schema
+        report['sources'] = additional_sources
         report['images'] = images
         report['videos'] = videos
+        # key_findings: if the LLM didn't produce them, extract bullet points from the summary
+        if 'key_findings' not in report or not report.get('key_findings'):
+            summary = report.get('summary', '')
+            if summary:
+                # Simple split: break summary into sentence-based findings
+                sentences = [s.strip() for s in summary.replace('. ', '.\n').split('\n') if s.strip()]
+                report['key_findings'] = sentences[:5] if len(sentences) >= 2 else [summary]
+            else:
+                report['key_findings'] = []
 
         analysis.research_queries = queries
         analysis.research_report = report

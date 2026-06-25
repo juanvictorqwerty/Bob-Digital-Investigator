@@ -1,0 +1,41 @@
+{
+    "domains": [
+        "reuters.com", "apnews.com", "bbc.com", "nytimes.com", "washingtonpost.com",
+        "theguardian.com", "wsj.com", "bloomberg.com", "cnn.com", "nbcnews.com",
+        "abcnews.go.com", "cbsnews.com", "time.com", "theatlantic.com", "politico.com",
+        "npr.org", "pbs.org", "ft.com", "economist.com", "nature.com", "science.org",
+        "gov.uk", "gov.au", "canada.ca", "europa.eu", "un.org", "who.int",
+        "whitehouse.gov", "state.gov", "justice.gov", "fbi.gov", "nih.gov",
+        "facebook.com", "fb.com", "prc.cm"
+    ],
+    "trusted_suffixes": [
+        "org",".gov","edu","int"
+    ],
+    "certified_facebook_pages": [
+        "prctvcameroun","camerountribune","Canal2International","MinesupCamerounOfficiel","minfi.cameroun","fondsroutiercameroun",
+        "mindefcm","MinpostelCameroun","MinpostelCameroun","MincomCameroon","prc.cellcom","PRC.CabinetCivil"
+    ],
+    "cameroon_keywords": [
+        "cameroon", "cameroun", "yaounde", "yaoundé", "douala",
+        "bamenda", "bafoussam", "garoua", "kribi", "buea", "limbe"
+    ],
+    "government_tlds": [
+        ".gov", ".gov.cm", ".gouv", ".gouv.fr", ".gov.uk", ".gov.ng"
+    ],
+    "official_presidential_domains": [
+        "prc.cm", "presidence.cm",
+        "elysee.fr", "kremlin.ru", "whitehouse.gov",
+        "state.gov", "gov.uk", "bundesregierung.de",
+        "gob.mx", "gov.br", "gov.ng", "gov.za",
+        "gov.in", "gov.cn", "gov.au", "gc.ca",
+        "gouvernement.fr", "governo.it", "moncloa.gob.es"
+    ],
+    "tier1_news_agencies": [
+        "reuters.com", "apnews.com", "afp.com", "afp.fr",
+        "bbc.com", "bbc.co.uk", "france24.com", "rfi.fr"
+    ],
+    "tier1_african_news": [
+        "jeuneafrique.com", "africanews.com", "panapress.com",
+        "cameroon-tribune.cm", "crtv.cm", "journalducameroun.com"
+    ]
+}

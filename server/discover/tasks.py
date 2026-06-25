@@ -17,7 +17,7 @@ def run_research_generation(self, analysis_id):
         analysis_id: UUID of the RobotAnalysis record
 
     Returns:
-        Dict with the research report data
+        Dict with the research report data including images and videos
     """
     from robot.models import RobotAnalysis
     from .research_generator import generate_research_report
@@ -132,6 +132,30 @@ def run_research_generation(self, analysis_id):
                 'snippet': r.get('snippet', '')[:300] if r.get('snippet') else '',
             })
 
+        # Step 4c: Extract images and videos for the frontend
+        images = []
+        for img in search_results.get('images', [])[:20]:
+            images.append({
+                'title': img.get('title', ''),
+                'thumbnail_url': img.get('thumbnail_url', ''),
+                'source_url': img.get('source_url', ''),
+                'page_url': img.get('page_url', ''),
+                'domain': img.get('domain', ''),
+                'width': img.get('width'),
+                'height': img.get('height'),
+            })
+
+        videos = []
+        for vid in search_results.get('videos', [])[:20]:
+            videos.append({
+                'title': vid.get('title', ''),
+                'thumbnail_url': vid.get('thumbnail_url', ''),
+                'url': vid.get('url', ''),
+                'domain': vid.get('domain', ''),
+                'duration': vid.get('duration'),
+                'description': vid.get('description', ''),
+            })
+
         # Step 5: Save to DB (95-100%)
         self.update_state(
             state="PROGRESS",
@@ -141,8 +165,10 @@ def run_research_generation(self, analysis_id):
             }
         )
 
-        # Include additional sources alongside the LLM summary
+        # Include additional sources, images, and videos alongside the LLM summary
         report['additional_sources'] = additional_sources
+        report['images'] = images
+        report['videos'] = videos
 
         analysis.research_queries = queries
         analysis.research_report = report
@@ -151,7 +177,7 @@ def run_research_generation(self, analysis_id):
         logger.info(
             f"Research report saved for analysis {analysis_id}: "
             f"summary={len(report.get('summary', ''))} chars, "
-            f"sources={len(additional_sources)}"
+            f"sources={len(additional_sources)}, images={len(images)}, videos={len(videos)}"
         )
 
         return {

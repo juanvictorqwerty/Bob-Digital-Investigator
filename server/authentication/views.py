@@ -34,8 +34,8 @@ class UserLoginView(generics.GenericAPIView):
     serializer_class = UserLoginSerializer
 
     def post(self, request):
-        serializer = UserLoginSerializer(data=request.data)  # ← direct instantiation
-
+        serializer = self.get_serializer(data=request.data)
+        
         if not serializer.is_valid():
             return Response({'error': 'Please provide both email and password'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -49,31 +49,6 @@ class UserLoginView(generics.GenericAPIView):
             if not created:
                 token.created = timezone.now()
                 token.save()
-            return Response({
-                'token': token.key,
-                'email': user.email
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-    """Handles user login, authenticates credentials, and updates/returns a token."""
-    serializer_class = UserLoginSerializer
-    def post(self, request):
-        serializer = self.get_serializer(data=request.data)
-        email = request.data.get('email')
-        password = request.data.get('password')
-
-        if not email or not password:
-            return Response({'error': 'Please provide both email and password'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Use Django's built-in authenticate to safely check credentials
-        user = authenticate(request, email=email, password=password)
-
-        if user is not None:
-            token, created = Token.objects.get_or_create(user=user)
-            if not created:
-                token.created = timezone.now()
-                token.save()
-
             return Response({
                 'token': token.key,
                 'email': user.email

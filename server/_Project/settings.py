@@ -208,6 +208,8 @@ CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
 
 # OpenRouter Configuration
 OPENROUTER_API_KEY = env('OPENROUTER_API_KEY', default='')
+OPENROUTER_DEFAULT_MODEL = env('OPENROUTER_DEFAULT_MODEL', default='google/gemma-4-26b-a4b-it:free')
+OPENROUTER_FALLBACK_MODEL = env('OPENROUTER_FALLBACK_MODEL', default='cohere/north-mini-code:free')
 # RapidAPI Configuration
 
 REVERSE_IMAGE_API_KEY = env('REVERSE_IMAGE', default='')

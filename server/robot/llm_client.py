@@ -11,12 +11,6 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-# Default model — good balance of quality/price
-DEFAULT_MODEL = "openai/gpt-4o-mini"
-
-# Fallback model if the primary is unavailable
-FALLBACK_MODEL = "anthropic/claude-3-haiku"
-
 # Valid system verdicts for validation
 VALID_VERDICTS = {"real", "likely", "fake", "suspicious", "unconfirmed"}
 
@@ -447,7 +441,7 @@ def analyze_with_openrouter(prompt: str, statistics: dict = None, model: str = N
     Returns:
         Tuple of (verdict_dict, raw_response_json)
     """
-    model = model or DEFAULT_MODEL
+    model = model or settings.OPENROUTER_DEFAULT_MODEL
 
     try:
         client = get_openrouter_client()
@@ -484,10 +478,10 @@ def analyze_with_openrouter(prompt: str, statistics: dict = None, model: str = N
         logger.error(f"OpenRouter call failed with {model}: {str(e)}")
 
         # Clean fallback escalation block
-        if model != FALLBACK_MODEL:
-            logger.info(f"Falling back to {FALLBACK_MODEL}...")
+        if model != settings.OPENROUTER_FALLBACK_MODEL:
+            logger.info(f"Falling back to {settings.OPENROUTER_FALLBACK_MODEL}...")
             try:
-                return analyze_with_openrouter(prompt, statistics=statistics, model=FALLBACK_MODEL)
+                return analyze_with_openrouter(prompt, statistics=statistics, model=settings.OPENROUTER_FALLBACK_MODEL)
             except Exception as fallback_err:
                 logger.error(f"Fallback also failed: {str(fallback_err)}")
 

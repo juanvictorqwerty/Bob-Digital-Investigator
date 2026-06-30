@@ -157,7 +157,8 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana/}
+      GF_SERVER_DOMAIN: "95.111.225.85"                  # <-- FIXED: Server Public IP
+      GF_SERVER_ROOT_URL: "http://95.111.225.85/grafana/" # <-- FIXED: Direct public URL path
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana_data:/var/lib/grafana

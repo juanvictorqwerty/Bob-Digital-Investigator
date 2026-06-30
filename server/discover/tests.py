@@ -17,6 +17,7 @@ from .research_generator import (
     _fallback_report,
     _empty_report,
     _parse_llm_response,
+    _extract_keywords_from_results,
     run_searxng_searches,
     compile_research_with_llm,
     generate_research_report,
@@ -182,49 +183,136 @@ class ResearchProgressViewTests(TestCase):
 class GenerateResearchQueriesTests(SimpleTestCase):
     """Tests for generate_research_queries()."""
 
-    def test_fake_verdict(self):
-        """fake verdict returns truth/debunk queries."""
+    def test_fake_verdict_fallback(self):
+        """fake verdict fallback returns fact check + debunk queries."""
         queries = generate_research_queries("Some claim", "fake")
-        self.assertGreater(len(queries), 0)
+        self.assertEqual(len(queries), 2)
         self.assertTrue(any("fact check" in q for q in queries))
         self.assertTrue(any("debunked" in q for q in queries))
-        self.assertTrue(any("what actually happened" in q for q in queries))
 
-    def test_suspicious_verdict(self):
-        """suspicious verdict returns truth/debunk queries (same as fake)."""
+    def test_suspicious_verdict_fallback(self):
+        """suspicious verdict fallback returns fact check + debunk queries."""
         queries = generate_research_queries("Some claim", "suspicious")
-        self.assertGreater(len(queries), 0)
+        self.assertEqual(len(queries), 2)
         self.assertTrue(any("fact check" in q for q in queries))
+        self.assertTrue(any("debunked" in q for q in queries))
 
-    def test_real_verdict(self):
-        """real verdict returns confirming queries."""
+    def test_real_verdict_fallback(self):
+        """real verdict fallback returns background + developments queries."""
         queries = generate_research_queries("Some claim", "real")
-        self.assertGreater(len(queries), 0)
+        self.assertEqual(len(queries), 2)
         self.assertTrue(any("background" in q for q in queries))
-        self.assertTrue(any("official statement" in q for q in queries))
+        self.assertTrue(any("developments" in q for q in queries))
 
-    def test_likely_verdict(self):
-        """likely verdict returns confirming queries."""
+    def test_likely_verdict_fallback(self):
+        """likely verdict fallback returns background + developments queries."""
         queries = generate_research_queries("Some claim", "likely")
-        self.assertGreater(len(queries), 0)
+        self.assertEqual(len(queries), 2)
         self.assertTrue(any("background" in q for q in queries))
+        self.assertTrue(any("developments" in q for q in queries))
 
-    def test_unconfirmed_verdict(self):
-        """unconfirmed verdict returns clarification queries."""
+    def test_unconfirmed_verdict_fallback(self):
+        """unconfirmed verdict fallback returns fact check + evidence queries."""
         queries = generate_research_queries("Some claim", "unconfirmed")
-        self.assertGreater(len(queries), 0)
+        self.assertEqual(len(queries), 2)
         self.assertTrue(any("fact check" in q for q in queries))
-        self.assertTrue(any("verification" in q for q in queries))
-        self.assertTrue(any("sources" in q for q in queries))
+        self.assertTrue(any("evidence" in q for q in queries))
 
-    def test_empty_claim(self):
-        """Empty claim returns empty list."""
+    def test_empty_claim_fallback(self):
+        """Empty claim returns empty list (fallback path)."""
         self.assertEqual(generate_research_queries("", "fake"), [])
         self.assertEqual(generate_research_queries("   ", "real"), [])
 
-    def test_none_claim(self):
-        """None claim returns empty list."""
+    def test_none_claim_fallback(self):
+        """None claim returns empty list (fallback path)."""
         self.assertEqual(generate_research_queries(None, "fake"), [])
+
+    def test_with_processed_data_calls_llm(self):
+        """When processed_data has keywords, should call LLM for queries."""
+        processed_data = {
+            "normalized_results": [
+                {"title": "Election fraud in Cameroon", "snippet": "Reports of election fraud emerging"},
+                {"title": "Cameroon election results", "snippet": "Official results show landslide"},
+            ]
+        }
+        with patch("discover.research_generator.settings") as mock_settings:
+            mock_settings.OPENROUTER_API_KEY = "test-key"
+            with patch("discover.research_generator.OpenAI") as mock_openai:
+                mock_client = MagicMock()
+                mock_choice = MagicMock()
+                mock_choice.message.content = "election fraud investigation\nCameroon election results analysis"
+                mock_client.chat.completions.create.return_value = MagicMock(
+                    choices=[mock_choice]
+                )
+                mock_openai.return_value = mock_client
+
+                queries = generate_research_queries(
+                    claim="Some claim",
+                    verdict="fake",
+                    confidence=0.85,
+                    explanation="The claim is fake because...",
+                    processed_data=processed_data,
+                )
+                self.assertEqual(len(queries), 2)
+                mock_openai.assert_called_once()
+
+    def test_with_processed_data_no_api_key_falls_back(self):
+        """When processed_data provided but no API key, falls back to templates."""
+        processed_data = {
+            "normalized_results": [
+                {"title": "Election fraud", "snippet": "Reports of fraud"},
+            ]
+        }
+        with patch("discover.research_generator.settings") as mock_settings:
+            mock_settings.OPENROUTER_API_KEY = ""
+            queries = generate_research_queries(
+                claim="Some claim",
+                verdict="fake",
+                confidence=0.85,
+                explanation="Explanation",
+                processed_data=processed_data,
+            )
+            # Should fall back to template queries
+            self.assertEqual(len(queries), 2)
+            self.assertTrue(any("fact check" in q for q in queries))
+
+    def test_with_processed_data_llm_fails_falls_back(self):
+        """When processed_data provided but LLM call fails, falls back."""
+        processed_data = {
+            "normalized_results": [
+                {"title": "Election fraud", "snippet": "Reports of fraud"},
+            ]
+        }
+        with patch("discover.research_generator.settings") as mock_settings:
+            mock_settings.OPENROUTER_API_KEY = "test-key"
+            with patch("discover.research_generator.OpenAI") as mock_openai:
+                mock_client = MagicMock()
+                mock_client.chat.completions.create.side_effect = Exception("API error")
+                mock_openai.return_value = mock_client
+
+                queries = generate_research_queries(
+                    claim="Some claim",
+                    verdict="fake",
+                    confidence=0.85,
+                    explanation="Explanation",
+                    processed_data=processed_data,
+                )
+                # Should fall back to template queries
+                self.assertEqual(len(queries), 2)
+                self.assertTrue(any("fact check" in q for q in queries))
+
+    def test_with_processed_data_empty_results_falls_back(self):
+        """When processed_data has empty results, falls back to templates."""
+        processed_data = {"normalized_results": []}
+        queries = generate_research_queries(
+            claim="Some claim",
+            verdict="fake",
+            confidence=0.85,
+            explanation="Explanation",
+            processed_data=processed_data,
+        )
+        self.assertEqual(len(queries), 2)
+        self.assertTrue(any("fact check" in q for q in queries))
 
 
 class FallbackReportTests(SimpleTestCase):
@@ -518,7 +606,7 @@ class GenerateResearchReportTests(SimpleTestCase):
         queries, report, sources, images, videos = generate_research_report(
             websearch, robot_analysis, {}
         )
-        self.assertEqual(len(queries), 3)
+        self.assertEqual(len(queries), 2)
         self.assertEqual(report["summary"], "Research summary")
         self.assertEqual(len(sources), 1)
         self.assertEqual(len(images), 1)
@@ -538,6 +626,68 @@ class GenerateResearchReportTests(SimpleTestCase):
         self.assertEqual(sources, [])
         self.assertEqual(images, [])
         self.assertEqual(videos, [])
+
+
+# ═══════════════════════════════════════════════════════════════
+#  _extract_keywords_from_results Tests
+# ═══════════════════════════════════════════════════════════════
+
+class ExtractKeywordsFromResultsTests(SimpleTestCase):
+    """Tests for _extract_keywords_from_results()."""
+
+    def test_extracts_keywords_from_titles_and_snippets(self):
+        """Should extract most frequent meaningful keywords."""
+        data = {
+            "normalized_results": [
+                {"title": "Election fraud in Cameroon", "snippet": "Reports of election fraud emerging in Yaounde"},
+                {"title": "Cameroon election results", "snippet": "Official results show landslide victory"},
+            ]
+        }
+        keywords = _extract_keywords_from_results(data, max_keywords=10)
+        self.assertIn("election", keywords)
+        self.assertIn("cameroon", keywords)
+        self.assertIn("fraud", keywords)
+        self.assertNotIn("the", keywords)  # Stop word
+        self.assertNotIn("of", keywords)   # Stop word
+
+    def test_skips_stop_words(self):
+        """Should skip common stop words."""
+        data = {
+            "normalized_results": [
+                {"title": "The and for with from", "snippet": "this that these those"},
+            ]
+        }
+        keywords = _extract_keywords_from_results(data)
+        self.assertEqual(len(keywords), 0)
+
+    def test_empty_results(self):
+        """Empty normalized_results returns empty list."""
+        self.assertEqual(_extract_keywords_from_results({}), [])
+        self.assertEqual(_extract_keywords_from_results({"normalized_results": []}), [])
+        self.assertEqual(_extract_keywords_from_results(None), [])
+
+    def test_falls_back_to_top_candidates(self):
+        """When normalized_results is empty, should try top_candidates."""
+        data = {
+            "normalized_results": [],
+            "top_candidates": [
+                {"title": "Investigation launched", "snippet": "Authorities launch investigation"},
+            ]
+        }
+        keywords = _extract_keywords_from_results(data, max_keywords=5)
+        self.assertIn("investigation", keywords)
+
+    def test_uses_extracted_text_field(self):
+        """Should also check extracted_text if available."""
+        data = {
+            "normalized_results": [
+                {"title": "Short title", "extracted_text": "Detailed analysis of corruption scandal"},
+            ]
+        }
+        keywords = _extract_keywords_from_results(data, max_keywords=10)
+        self.assertIn("corruption", keywords)
+        self.assertIn("scandal", keywords)
+        self.assertIn("analysis", keywords)
 
 
 # ═══════════════════════════════════════════════════════════════

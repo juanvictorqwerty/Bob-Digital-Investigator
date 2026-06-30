@@ -144,7 +144,7 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
               Bob
             </span>
             <span className="text-white/80 mx-0.5">·</span>
-            <span className="text-white/80">Investigator</span>
+            <span className="text-white/80">AURA</span>
           </span>
         </span>
       </h1>

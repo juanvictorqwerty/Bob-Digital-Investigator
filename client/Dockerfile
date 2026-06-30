@@ -61,4 +61,4 @@ COPY --from=build /usr/src/app/next.config.ts ./next.config.ts
 EXPOSE 3000
 
 # Run the application.
-CMD bun run start
+CMD bun run start --host 0.0.0.0

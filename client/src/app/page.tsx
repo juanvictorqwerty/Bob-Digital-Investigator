@@ -21,6 +21,11 @@ export default function Home() {
   const [sseLog, setSseLog] = useState<
     Array<{ event: string; data: any; timestamp: string }>
   >([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
 
   const handleMediaSelect = (file: File | null) => setSelectedFile(file);
   const handleQueryChange = (q: string) => setQuery(q);
@@ -212,18 +217,48 @@ export default function Home() {
 
   // ── Upload / home view ────────────────────────────────────────────────────
   return (
-    <main className={`${BackGroundColor} grid grid-cols-4 h-screen`}>
-      {/* Sidebar — only shown on the home/upload page */}
-      <div className="bg-blue-50 col-span-1 p-4 border-r-2 border-gray-400 h-full overflow-y-auto">
-        <HistoryBlock
-          onSelectResult={handleSelectResult}
-          onAliasUpdate={(id, newAlias) => {
-            if (historyAlias && id) setHistoryAlias(newAlias);
-          }}
-        />
-      </div>
+    <main className={`${BackGroundColor} h-screen flex overflow-hidden`}>
+      {/* Sidebar — collapsible, matches ResultsPage pattern */}
+      {sidebarCollapsed ? (
+        <aside className="bg-blue-50 w-[40px] shrink-0 border-r-2 border-gray-400 flex flex-col items-center py-2 h-full overflow-hidden">
+          <button
+            onClick={toggleSidebar}
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-200 transition-colors text-blue-700"
+            title="Open history"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+          </button>
+          <div className="flex-1 flex items-center justify-center">
+            <span className="text-sm" title="History panel">🔍</span>
+          </div>
+        </aside>
+      ) : (
+        <aside className="bg-blue-50 w-1/4 shrink-0 border-r-2 border-gray-400 flex flex-col h-full overflow-hidden">
+          <div className="flex justify-end pt-1 pr-1">
+            <button
+              onClick={toggleSidebar}
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-200 transition-colors text-blue-700"
+              title="Collapse sidebar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <HistoryBlock
+              onSelectResult={handleSelectResult}
+              onAliasUpdate={(id, newAlias) => {
+                if (historyAlias && id) setHistoryAlias(newAlias);
+              }}
+            />
+          </div>
+        </aside>
+      )}
 
-      <div className="h-full flex flex-col justify-center items-center col-span-3 overflow-auto">
+      <div className="h-full flex flex-1 flex-col justify-center items-center overflow-auto">
         <div className="w-full max-w-md mx-auto">
           <UploadCard
             onFileSelect={handleMediaSelect}

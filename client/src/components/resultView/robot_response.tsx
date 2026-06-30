@@ -86,7 +86,7 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
           <div className="mb-6 pt-6 border-t-2 border-gray-200">
             {/* Section heading */}
             <div className="flex items-center gap-2 mb-3">
-              <span className="text-base">🤖</span>
+              <span className="text-base">BOB</span>
               <h2 className="text-base font-semibold text-gray-900">AI Analysis Conclusion</h2>
               {!robot.llm_used && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 font-medium">
@@ -110,7 +110,6 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
                         robot.confidence >= 0.4 ? "bg-amber-500" :
                         "bg-red-500"
                       }`}></span>
-                      {confidencePct}% confidence
                     </span>
                   </div>
 

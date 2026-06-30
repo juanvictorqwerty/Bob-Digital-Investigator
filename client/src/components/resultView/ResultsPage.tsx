@@ -368,7 +368,7 @@ export default function ResultsPage({
           </div>
         </aside>
       ) : (
-        <aside className="bg-blue-50 w-[260px] shrink-0 border-r-2 border-gray-400 flex flex-col h-full overflow-hidden">
+        <aside className="bg-blue-50 w-1/4 shrink-0 border-r-2 border-gray-400 flex flex-col h-full overflow-hidden">
           {/* Collapse button at top of sidebar */}
           <div className="flex justify-end pt-1 pr-1">
             <button

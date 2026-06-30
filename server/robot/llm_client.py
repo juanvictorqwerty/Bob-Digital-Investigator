@@ -351,13 +351,14 @@ Each result includes crawled page content from the source.
 5. **Examine crawl data** — Do the crawled snippets contain sensational language, contradictory claims, lack of factual reporting, or AI-generated text?
 6. **Check for crawl failures** — If a credible source couldn't be crawled, note it but don't penalize the verdict.
 7. **DO NOT be overcautious** — If a credible source with a specific date confirms the claim, return "real" or "likely", not "unconfirmed".
+8. **What does the crawl results say ?
 
 ## Output Format
 Respond with a strict JSON object that matches this exact schema:
 {{
   "verdict": "real|likely|fake|suspicious|unconfirmed",
   "confidence": 0.0 to 1.0,
-  "short_summary": "short_summary": "Must start with 'These images show...' / 'These images do not show...' — one sentence matching the user's query language. The claim is: {query}",
+  "short_summary": "short_summary": "Must start with 'These images show...' / 'These images do not show...' — one sentence matching the user's query language. The claim is: {query}, resume what the crawl results said about the claim only the results that are relevant to the claim.",
   "explanation": "Detailed 3-6 sentence explanation of your reasoning. Reference the user's claim and the best source(s). Be specific: name the domain, date, and what the content actually says.",
   "key_evidence": [
     "Specific item from results: domain, date, and what it says",

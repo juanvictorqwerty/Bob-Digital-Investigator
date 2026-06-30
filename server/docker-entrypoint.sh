@@ -39,4 +39,4 @@ if [ "$1" = "celery" ]; then
 fi
 
 echo "→ Starting gunicorn..."
-exec runuser -u "$APP_USER" -- gunicorn '_Project.wsgi' --bind=0.0.0.0:8000 --workers=4 --timeout=120
+exec runuser -u "$APP_USER" -- gunicorn '_Project.wsgi' --bind=0.0.0.0:8000 --workers=4 --timeout=120 --home=/tmp

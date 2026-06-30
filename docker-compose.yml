@@ -65,6 +65,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       SEARXNG_BASE_URL: http://searxng:8080
+    volumes:
+      - staticfiles:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
@@ -139,6 +141,8 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.route-prefix=/prometheus/'
+      - '--web.external-url=${PROMETHEUS_EXTERNAL_URL:-http://localhost/prometheus/}'
     depends_on:
       - django
     networks:
@@ -153,7 +157,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana/}
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana_data:/var/lib/grafana
@@ -172,6 +176,7 @@ services:
       - "${NGINX_PORT:-80}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - staticfiles:/app/staticfiles:ro
     depends_on:
       - client
       - django
@@ -188,5 +193,6 @@ networks:
 volumes:
   postgresql_data:
   redis_data:
+  staticfiles:
   prometheus_data:
   grafana_data:

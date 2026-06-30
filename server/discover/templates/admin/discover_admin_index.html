@@ -4,13 +4,13 @@
 <div style="margin-bottom: 20px;">
     <h2 style="margin-bottom: 10px;">Monitoring</h2>
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-        <a href="{{ grafana_url|default:'http://localhost:3001' }}" target="_blank"
+        <a href="/grafana/" target="_blank"
            style="display: inline-flex; align-items: center; gap: 6px;
                   padding: 10px 20px; background: #F05A28; color: white;
                   text-decoration: none; border-radius: 4px; font-weight: 600;">
             <span>📊</span> Open Grafana Dashboard
         </a>
-        <a href="{{ prometheus_url|default:'http://localhost:9090' }}" target="_blank"
+        <a href="/prometheus/" target="_blank"
            style="display: inline-flex; align-items: center; gap: 6px;
                   padding: 10px 20px; background: #E6522C; color: white;
                   text-decoration: none; border-radius: 4px; font-weight: 600;">

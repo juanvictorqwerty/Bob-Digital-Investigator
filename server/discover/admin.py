@@ -14,8 +14,8 @@ original_each_context = admin.site.each_context
 
 def patched_each_context(self, request):
     context = original_each_context(request)
-    context['grafana_url'] = 'http://localhost:3001'
-    context['prometheus_url'] = 'http://localhost:9090'
+    context['grafana_url'] = '/grafana/'
+    context['prometheus_url'] = '/prometheus/'
     return context
 
 

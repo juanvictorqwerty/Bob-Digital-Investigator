@@ -33,7 +33,7 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/history/`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/history/`,
         {
           headers: {
             Authorization: `Token ${token}`,
@@ -61,7 +61,7 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/history/${id}/alias/`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/history/${id}/alias/`,
         {
           method: "PATCH",
           headers: {
@@ -93,7 +93,7 @@ export default function HistoryBlock({ onSelectResult, onAliasUpdate }: HistoryB
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/history/${item.id}/`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/history/${item.id}/`,
         {
           headers: {
             Authorization: `Token ${token}`,

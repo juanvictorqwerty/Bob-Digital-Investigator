@@ -111,7 +111,7 @@ export default function RobotResponse({ robot, compact = false, onViewMore, onBa
         /* ── Expanded full content ── */
         <div className="transition-all">
           {/* Header row with collapse button */}
-          <div className="flex items-center justify-between mb-3">Quand je vois Nginx moi c'est une mauvaise nouvelle
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <span className="text-base">BOB</span>
               <h2 className="text-base font-semibold text-gray-900">AI Analysis Conclusion</h2>

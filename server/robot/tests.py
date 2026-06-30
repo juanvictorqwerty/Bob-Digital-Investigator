@@ -621,7 +621,7 @@ class LoadTrustedDomainsTests(SimpleTestCase):
         """_get_tier1_african_domains should return a list."""
         domains = _get_tier1_african_domains()
         self.assertIsInstance(domains, list)
-        self.assertIn("jeuneafrique.com", domains)
+        self.assertIn("cameroon-tribune.cm", domains)
 
 
 class CredibleSourceCitedTests(SimpleTestCase):

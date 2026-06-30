@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import RobotResponse from "@/components/resultView/robot_response";
 
 const baseRobot = {
@@ -44,7 +45,7 @@ describe("RobotResponse", () => {
     expect(screen.getByText("This image is authentic")).toBeTruthy();
   });
 
-  it("renders explanation when short_summary is empty", () => {
+  it("renders explanation when short_summary is empty", async () => {
     render(
       <RobotResponse
         robot={{
@@ -54,31 +55,51 @@ describe("RobotResponse", () => {
         }}
       />
     );
+    // Component starts collapsed, need to click to expand
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.getByText("Fallback explanation")).toBeTruthy();
   });
 
-  it("renders key evidence items", () => {
+  it("renders key evidence items", async () => {
     render(<RobotResponse robot={baseRobot} />);
+    // Component starts collapsed, need to click to expand
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.getByText("Evidence 1")).toBeTruthy();
     expect(screen.getByText("Evidence 2")).toBeTruthy();
   });
 
-  it("renders 'Rules-based' badge when llm_used is false", () => {
+  it("renders 'Rules-based' badge when llm_used is false", async () => {
     render(<RobotResponse robot={{ ...baseRobot, llm_used: false }} />);
+    // Component starts collapsed, need to click to expand
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.getByText("Rules-based")).toBeTruthy();
   });
 
-  it("does not render 'Rules-based' badge when llm_used is true", () => {
+  it("does not render 'Rules-based' badge when llm_used is true", async () => {
     render(<RobotResponse robot={baseRobot} />);
+    // Component starts collapsed, click to expand and verify no badge
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.queryByText("Rules-based")).toBeNull();
   });
 
-  it("renders 'View research report →' button when onViewMore is provided", () => {
+  it("renders 'View research report →' button when onViewMore is provided", async () => {
     render(<RobotResponse robot={baseRobot} onViewMore={() => {}} />);
+    // Component starts collapsed, need to click to expand
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.getByText("View research report →")).toBeTruthy();
   });
 
-  it("renders '← Back to results' button when showResearch is true", () => {
+  it("renders '← Back to results' button when showResearch is true", async () => {
     render(
       <RobotResponse
         robot={baseRobot}
@@ -86,6 +107,10 @@ describe("RobotResponse", () => {
         onBackToResults={() => {}}
       />
     );
+    // Component starts collapsed, need to click to expand
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.getByText("← Back to results")).toBeTruthy();
   });
 
@@ -95,8 +120,12 @@ describe("RobotResponse", () => {
     expect(screen.getByText("95% confidence")).toBeTruthy();
   });
 
-  it("renders AI attribution footer", () => {
+  it("renders AI attribution footer", async () => {
     render(<RobotResponse robot={baseRobot} />);
+    // Component starts collapsed, need to click to expand
+    const user = userEvent.setup();
+    const collapseButton = screen.getByRole("button");
+    await user.click(collapseButton);
     expect(screen.getByText(/Analysis powered by AI/)).toBeTruthy();
   });
 });

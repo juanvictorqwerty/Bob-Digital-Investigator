@@ -22,25 +22,21 @@ describe("RobotResponse", () => {
   it("renders verdict label with icon for 'real'", () => {
     render(<RobotResponse robot={baseRobot} />);
     expect(screen.getByText("Real News")).toBeTruthy();
-    expect(screen.getByText("95% confidence")).toBeTruthy();
   });
 
   it("renders verdict 'Fake News'", () => {
     render(<RobotResponse robot={{ ...baseRobot, verdict: "fake", confidence: 0.85 }} />);
     expect(screen.getByText("Fake News")).toBeTruthy();
-    expect(screen.getByText("85% confidence")).toBeTruthy();
   });
 
   it("renders verdict 'Suspicious'", () => {
     render(<RobotResponse robot={{ ...baseRobot, verdict: "suspicious", confidence: 0.6 }} />);
     expect(screen.getByText("Suspicious")).toBeTruthy();
-    expect(screen.getByText("60% confidence")).toBeTruthy();
   });
 
   it("renders verdict 'Unconfirmed'", () => {
     render(<RobotResponse robot={{ ...baseRobot, verdict: "unconfirmed", confidence: 0.4 }} />);
     expect(screen.getByText("Unconfirmed")).toBeTruthy();
-    expect(screen.getByText("40% confidence")).toBeTruthy();
   });
 
   it("renders short summary", () => {

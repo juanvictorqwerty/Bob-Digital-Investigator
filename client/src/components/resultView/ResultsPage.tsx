@@ -434,7 +434,7 @@ export default function ResultsPage({
         {/* ── Scrollable Main Body ── */}
         <main className="flex-1 overflow-y-auto min-h-0">
           {/* Bottom padding clears the robot footer (~220px is safe) */}
-          <div className="max-w-5xl mx-auto px-6 pt-6 pb-56">
+          <div className="max-w-5xl mx-auto px-6 pt-6 pb-32">
 
             {viewMode === "original" && (
               <>

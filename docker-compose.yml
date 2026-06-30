@@ -1,7 +1,7 @@
 services:
   # ── Database ──────────────────────────────────────────────
   database:
-    image: postgres:17
+    image: postgres:latest
     restart: unless-stopped
     volumes:
       - postgresql_data:/var/lib/postgresql

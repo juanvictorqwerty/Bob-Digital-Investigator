@@ -170,7 +170,7 @@ export default function ResultsPage({
   const pollResearchProgress = useCallback(
     async (taskId: string, token: string): Promise<any> => {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/discover/progress/${taskId}/`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/discover/progress/${taskId}/`,
         {
           headers: {
             Authorization: `Token ${token}`,
@@ -264,7 +264,7 @@ export default function ResultsPage({
 
     try {
       const checkResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/discover/generate/`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/discover/generate/`,
         {
           method: "POST",
           headers: {

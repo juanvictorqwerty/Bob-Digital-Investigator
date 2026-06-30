@@ -52,7 +52,7 @@ export default function Home() {
 
   const pollProgress = async (taskId: string, token: string): Promise<any> => {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/reverse-search/progress/${taskId}/`,
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/reverse-search/progress/${taskId}/`,
       {
         headers: {
           Authorization: `Token ${token}`,
@@ -134,7 +134,7 @@ export default function Home() {
 
       const token = Cookies.get("token");
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/reverse-search/`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/reverse-search/`,
         {
           method: "POST",
           body: formData,

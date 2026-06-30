@@ -71,7 +71,13 @@ def run_research_generation(self, analysis_id):
         )
 
         from .research_generator import generate_research_queries
-        queries = generate_research_queries(websearch_result.query, analysis.verdict)
+        queries = generate_research_queries(
+            claim=websearch_result.query,
+            verdict=analysis.verdict,
+            confidence=analysis.confidence_score,
+            explanation=analysis.explanation,
+            processed_data=websearch_result.results,
+        )
 
         # Step 3: Execute SearXNG searches (20-70%)
         self.update_state(

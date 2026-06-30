@@ -1,7 +1,7 @@
 services:
   # ── Database ──────────────────────────────────────────────
-  database:
-    image: postgres:17
+  db:
+    image: postgres:latest
     restart: unless-stopped
     volumes:
       - postgresql_data:/var/lib/postgresql
@@ -60,13 +60,15 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: database
+      DB_HOST: db
       DB_PORT: "5432"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       SEARXNG_BASE_URL: http://searxng:8080
+    volumes:
+      - staticfiles:/app/staticfiles
     depends_on:
-      database:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -85,13 +87,13 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: database
+      DB_HOST: db
       DB_PORT: "5432"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       SEARXNG_BASE_URL: http://searxng:8080
     depends_on:
-      database:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -153,12 +155,32 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./server/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./server/grafana/datasources:/etc/grafana/provisioning/datasources
     depends_on:
       - prometheus
+    networks:
+      - bob-network
+
+  # ── Nginx (reverse proxy) ─────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - staticfiles:/app/staticfiles:ro
+    depends_on:
+      - client
+      - django
+      - searxng
+      - prometheus
+      - grafana
     networks:
       - bob-network
 
@@ -169,5 +191,6 @@ networks:
 volumes:
   postgresql_data:
   redis_data:
+  staticfiles:
   prometheus_data:
   grafana_data:

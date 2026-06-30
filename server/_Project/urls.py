@@ -21,7 +21,7 @@ from django.urls import path, include
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include('django_prometheus.urls')),
-    path('', include('authentication.urls')),
+    path('api/', include('authentication.urls')),
     path('api/', include('reversewebsearch.urls')),
     path('api/', include('discover.urls')),
 ]

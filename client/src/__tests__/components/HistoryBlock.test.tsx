@@ -3,10 +3,10 @@ import { render, screen } from "@testing-library/react";
 import HistoryBlock from "@/components/HistoryBlock";
 
 describe("HistoryBlock", () => {
-  it("renders the Bob Investigator header", () => {
+  it("renders the Bob AURA header", () => {
     render(<HistoryBlock />);
     expect(screen.getByText("Bob")).toBeTruthy();
-    expect(screen.getByText("Investigator")).toBeTruthy();
+    expect(screen.getByText("AURA")).toBeTruthy();
   });
 
   it("renders the History heading", () => {

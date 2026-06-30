@@ -72,6 +72,10 @@ MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
+# ── Nginx Reverse Proxy Support ──────────────────────────────
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 ROOT_URLCONF = '_Project.urls'
 
 TEMPLATES = [
@@ -141,7 +145,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 #Django-Rest-Framework
@@ -159,11 +163,16 @@ AUTH_USER_MODEL = 'authentication.CustomUser'
 CORS_ALLOWED_ORIGINS = [
     env("FRONTEND_URL"),
     "http://localhost:3000",
+    "http://localhost",
+    "http://localhost:80",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     env("FRONTEND_URL"),
+    env("BACKEND_URL"),
     "http://localhost:3000",
+    "http://localhost",
+    "http://localhost:80",
 ]
 
 CORS_ALLOW_CREDENTIALS = True

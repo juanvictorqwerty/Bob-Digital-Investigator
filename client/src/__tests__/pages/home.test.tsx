@@ -10,7 +10,7 @@ describe("Home Page Components", () => {
   it("HistoryBlock renders Bob header", () => {
     render(<HistoryBlock />);
     expect(screen.getByText("Bob")).toBeTruthy();
-    expect(screen.getByText("Investigator")).toBeTruthy();
+    expect(screen.getByText("AURA")).toBeTruthy();
   });
 
   it("UploadCard renders correctly", () => {

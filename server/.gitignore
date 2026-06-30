@@ -11,3 +11,4 @@ robot/__pycache__/
 robot/migrations/__pycache__/
 discover/__pycache__/
 discover/migrations/__pycache__/
+__pycache__/

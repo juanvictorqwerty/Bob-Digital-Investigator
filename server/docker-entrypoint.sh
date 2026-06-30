@@ -1,16 +1,25 @@
 #!/bin/bash
 set -e
 
+APP_USER=appuser
+
+run_as_app() {
+    runuser -u "$APP_USER" -- "$@"
+}
+
+mkdir -p /app/staticfiles
+chown -R "$APP_USER:$APP_USER" /app/staticfiles
+
 echo "→ Running database migrations..."
-python manage.py migrate --noinput
+run_as_app python manage.py migrate --noinput
 
 echo "→ Collecting static files..."
-python manage.py collectstatic --noinput --clear
+run_as_app python manage.py collectstatic --noinput --clear
 
 # Create superuser if DJANGO_SUPERUSER_EMAIL and DJANGO_SUPERUSER_PASSWORD are set
 if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
     echo "→ Creating/updating superuser ($DJANGO_SUPERUSER_EMAIL)..."
-    python manage.py shell -c "
+    run_as_app python manage.py shell -c "
 from django.contrib.auth import get_user_model;
 User = get_user_model();
 if not User.objects.filter(email='$DJANGO_SUPERUSER_EMAIL').exists():
@@ -26,8 +35,8 @@ if [ "$1" = "celery" ]; then
     echo "→ Starting celery worker..."
     # Pass through any additional celery arguments from docker compose command
     shift
-    exec celery -A _Project "$@"
+    exec runuser -u "$APP_USER" -- celery -A _Project "$@"
 fi
 
 echo "→ Starting gunicorn..."
-exec gunicorn '_Project.wsgi' --bind=0.0.0.0:8000 --workers=4 --timeout=120
+exec runuser -u "$APP_USER" -- gunicorn '_Project.wsgi' --bind=0.0.0.0:8000 --workers=4 --timeout=120

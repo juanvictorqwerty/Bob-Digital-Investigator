@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 interface ResearchSource {
   title: string;
   url: string;
@@ -48,6 +50,8 @@ function domainIcon(domain: string): string {
 export default function ResearchView({ report, verdict }: ResearchViewProps) {
   const isFalse = verdict === "fake" || verdict === "suspicious";
   const isUnconfirmed = verdict === "unconfirmed";
+  const [imagesOpen, setImagesOpen] = useState(false);
+  const [videosOpen, setVideosOpen] = useState(false);
 
   const sectionTitle = isFalse
     ? "What Actually Happened"
@@ -138,37 +142,58 @@ export default function ResearchView({ report, verdict }: ResearchViewProps) {
       {/* Images */}
       {report.images && report.images.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            Related Images ({report.images.length})
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {report.images.map((img: ResearchImage, i: number) => (
-              <a
-                key={i}
-                href={img.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group relative aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all"
-              >
-                {img.thumbnail_url ? (
-                  <img
-                    src={img.thumbnail_url}
-                    alt={img.title || "Related image"}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-400 text-2xl">
-                    🖼️
+          <button
+            onClick={() => setImagesOpen(!imagesOpen)}
+            className="w-full flex items-center justify-between p-4 rounded-xl bg-white border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200 group cursor-pointer mb-3"
+          >
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+              Related Images ({report.images.length})
+            </h3>
+            <div className={`text-gray-400 transition-transform duration-300 ${imagesOpen ? "rotate-180" : ""}`}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </button>
+          <div
+            className={`transition-all duration-300 overflow-hidden ${
+              imagesOpen ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+            }`}
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {report.images.map((img: ResearchImage, i: number) => (
+                <a
+                  key={i}
+                  href={img.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group relative aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all"
+                >
+                  {img.thumbnail_url ? (
+                    <img
+                      src={img.thumbnail_url}
+                      alt={img.title || "Related image"}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400 text-2xl">
+                      🖼️
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute bottom-0 left-0 right-0 p-2">
+                      <p className="text-xs text-white line-clamp-2">{img.title}</p>
+                    </div>
                   </div>
-                )}
-                <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="absolute bottom-0 left-0 right-0 p-2">
-                    <p className="text-xs text-white line-clamp-2">{img.title}</p>
-                  </div>
-                </div>
-              </a>
-            ))}
+                </a>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -176,54 +201,75 @@ export default function ResearchView({ report, verdict }: ResearchViewProps) {
       {/* Videos */}
       {report.videos && report.videos.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            Related Videos ({report.videos.length})
-          </h3>
-          <div className="space-y-3">
-            {report.videos.map((video: ResearchVideo, i: number) => (
-              <a
-                key={i}
-                href={video.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start gap-4 bg-white rounded-xl border border-gray-100 p-3 hover:border-gray-200 hover:shadow-sm transition-all"
-              >
-                {/* Thumbnail */}
-                <div className="relative w-40 aspect-video rounded-lg overflow-hidden bg-gray-100 shrink-0">
-                  {video.thumbnail_url ? (
-                    <img
-                      src={video.thumbnail_url}
-                      alt={video.title || "Video"}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400 text-2xl">
-                      ▶️
-                    </div>
-                  )}
-                  {video.duration && (
-                    <span className="absolute bottom-1 right-1 text-[10px] bg-black/75 text-white px-1.5 py-0.5 rounded font-medium">
-                      {video.duration}
-                    </span>
-                  )}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
+          <button
+            onClick={() => setVideosOpen(!videosOpen)}
+            className="w-full flex items-center justify-between p-4 rounded-xl bg-white border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200 group cursor-pointer mb-3"
+          >
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+              Related Videos ({report.videos.length})
+            </h3>
+            <div className={`text-gray-400 transition-transform duration-300 ${videosOpen ? "rotate-180" : ""}`}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </button>
+          <div
+            className={`transition-all duration-300 overflow-hidden ${
+              videosOpen ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+            }`}
+          >
+            <div className="space-y-3">
+              {report.videos.map((video: ResearchVideo, i: number) => (
+                <a
+                  key={i}
+                  href={video.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-4 bg-white rounded-xl border border-gray-100 p-3 hover:border-gray-200 hover:shadow-sm transition-all"
+                >
+                  {/* Thumbnail */}
+                  <div className="relative w-40 aspect-video rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                    {video.thumbnail_url ? (
+                      <img
+                        src={video.thumbnail_url}
+                        alt={video.title || "Video"}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        crossOrigin="anonymous"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-400 text-2xl">
+                        ▶️
+                      </div>
+                    )}
+                    {video.duration && (
+                      <span className="absolute bottom-1 right-1 text-[10px] bg-black/75 text-white px-1.5 py-0.5 rounded font-medium">
+                        {video.duration}
+                      </span>
+                    )}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
                     </div>
                   </div>
-                </div>
-                {/* Info */}
-                <div className="flex-1 min-w-0 pt-1">
-                  <p className="text-sm font-medium text-gray-800 line-clamp-2">{video.title}</p>
-                  {video.source && (
-                    <p className="text-xs text-gray-400 mt-1">{video.source}</p>
-                  )}
-                </div>
-              </a>
-            ))}
+                  {/* Info */}
+                  <div className="flex-1 min-w-0 pt-1">
+                    <p className="text-sm font-medium text-gray-800 line-clamp-2">{video.title}</p>
+                    {video.source && (
+                      <p className="text-xs text-gray-400 mt-1">{video.source}</p>
+                    )}
+                  </div>
+                </a>
+              ))}
+            </div>
           </div>
         </div>
       )}

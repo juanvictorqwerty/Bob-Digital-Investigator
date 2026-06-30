@@ -60,7 +60,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "rate(django_http_requests_latency_seconds_bucket[5m])",
+          "expr": "rate(django_http_requests_latency_including_middlewares_seconds_bucket[5m])",
           "legendFormat": "{{ le }}",
           "refId": "A"
         }
@@ -184,7 +184,7 @@
       "gridPos": { "h": 6, "w": 6, "x": 18, "y": 16 },
       "targets": [
         {
-          "expr": "rate(python_gc_collections_total[5m])",
+          "expr": "rate(python_gc_objects_collected_total[5m])",
           "legendFormat": "{{ generation }}",
           "refId": "A"
         }
@@ -207,8 +207,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
       "targets": [
         {
-          "expr": "sum by (status_code) (rate(django_http_responses_total_by_status_total[10m]))",
-          "legendFormat": "{{ status_code }}",
+          "expr": "sum by (status) (rate(django_http_responses_total_by_status_total[10m]))",
+          "legendFormat": "{{ status }}",
           "refId": "A"
         }
       ],

@@ -34,8 +34,8 @@ RUN mkdir -p /app/staticfiles && chown -R appuser:appuser /app/staticfiles
 
 RUN chmod +x docker-entrypoint.sh
 
-USER appuser
-
 EXPOSE 8000
+
+USER root
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

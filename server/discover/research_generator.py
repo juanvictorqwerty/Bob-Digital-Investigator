@@ -6,6 +6,8 @@ this module performs additional SearXNG searches and compiles a structured resea
 """
 import json
 import logging
+import re
+from collections import Counter
 from django.conf import settings
 from openai import OpenAI
 
@@ -17,18 +19,179 @@ logger = logging.getLogger(__name__)
 RESEARCH_MODEL = "openai/gpt-4o-mini"
 RESEARCH_FALLBACK_MODEL = "anthropic/claude-3-haiku"
 
+# Stop words to filter out when extracting keywords from results
+_STOP_WORDS = {
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "can", "shall", "its",
+    "it's", "it", "this", "that", "these", "those", "we", "you", "they",
+    "he", "she", "him", "her", "his", "my", "our", "their", "them",
+    "not", "no", "nor", "so", "if", "than", "then", "just", "about",
+    "also", "very", "too", "been", "has", "into", "more", "some", "such",
+    "only", "other", "over", "new", "after", "before", "between", "through",
+    "during", "above", "below", "up", "down", "out", "off", "under",
+    "again", "further", "once", "here", "there", "when", "where", "why",
+    "how", "all", "each", "every", "both", "few", "most", "own", "same",
+    "https", "http", "com", "org", "net", "www", "amp", "get", "find",
+}
 
-def generate_research_queries(claim, verdict):
+
+def _extract_keywords_from_results(processed_data, max_keywords=15):
     """
-    Generate search queries based on the claim and the analysis verdict.
+    Extract the most frequent meaningful keywords from search results.
+
+    Analyzes titles and snippets from normalized_results to find
+    the most common words that represent the topics in the results.
+
+    Args:
+        processed_data: The full results dict with normalized_results
+        max_keywords: Maximum number of keywords to return
+
+    Returns:
+        List of keyword strings (most frequent first)
+    """
+    if not processed_data:
+        return []
+
+    results = processed_data.get('normalized_results', [])
+    if not results:
+        results = processed_data.get('top_candidates', [])
+
+    if not results:
+        return []
+
+    word_counter = Counter()
+    for r in results:
+        title = (r.get('title') or '')
+        snippet = (r.get('snippet') or '')
+        # Also check extracted_text if available
+        extracted = (r.get('extracted_text') or '')
+        text = f"{title} {snippet} {extracted}".lower()
+
+        # Tokenize
+        words = re.findall(r'[a-z]+', text)
+        for word in words:
+            if len(word) >= 4 and word not in _STOP_WORDS:
+                word_counter[word] += 1
+
+    # Return the most common keywords
+    return [word for word, _ in word_counter.most_common(max_keywords)]
+
+
+def _call_llm_for_queries(api_key, claim, verdict, confidence, explanation, keywords):
+    """
+    Call OpenRouter to generate exactly 2 search queries based on keywords and analysis.
+
+    Args:
+        api_key: OpenRouter API key
+        claim: The original user claim
+        verdict: The analysis verdict
+        confidence: Confidence score
+        explanation: The robot analysis explanation
+        keywords: List of extracted keywords
+
+    Returns:
+        List of 2 query strings, or None on failure
+    """
+    keyword_text = ", ".join(keywords[:15]) if keywords else "(no keywords extracted)"
+
+    prompt = (
+        "You are a research assistant generating targeted search queries for a digital forensics investigation.\n\n"
+        "Based on the following AI analysis and the keywords extracted from the initial search results, "
+        "generate exactly 2 search queries that would find the most relevant additional information "
+        "to deepen the investigation.\n\n"
+        f"ORIGINAL USER CLAIM: {claim or '(none)'}\n"
+        f"AI VERDICT: {verdict}\n"
+        f"AI EXPLANATION: {explanation}\n"
+        f"KEYWORDS FROM RESULTS: {keyword_text}\n\n"
+        "Return exactly 2 search queries, one per line. Do NOT use site: operators. "
+        "Do NOT include any explanations, numbering, or bullet points. Just the 2 queries."
+    )
+
+    try:
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "https://bob-investigator.app",
+                "X-Title": "Bob Digital Investigator - Research Query Generation",
+            }
+        )
+
+        response = client.chat.completions.create(
+            model=RESEARCH_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=200,
+        )
+
+        content = response.choices[0].message.content.strip()
+        # Parse lines — strip empty lines and numbering
+        lines = []
+        for line in content.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            # Remove leading numbering like "1." or "1)"
+            line = re.sub(r'^[\d]+[\.\)]\s*', '', line)
+            # Remove leading dashes or quotes
+            line = line.strip('- ').strip('"').strip("'")
+            if line:
+                lines.append(line)
+
+        # Take exactly 2, fallback to 1 if only 1
+        queries = lines[:2] if len(lines) >= 2 else (lines[:1] if lines else [])
+        logger.info(f"LLM generated {len(queries)} research queries: {queries}")
+        return queries
+
+    except Exception as e:
+        logger.error(f"LLM query generation failed: {str(e)}")
+        return None
+
+
+def generate_research_queries(claim, verdict, confidence=0.0, explanation="", processed_data=None):
+    """
+    Generate search queries based on the analysis and the search results.
+
+    When processed_data is provided, uses the LLM to generate targeted queries
+    based on keywords extracted from the results + the robot analysis.
+    Falls back to claim-based template queries when processed_data or API key is missing.
 
     Args:
         claim: The original user claim / query text
         verdict: The analysis verdict (real, likely, fake, suspicious, unconfirmed)
+        confidence: Confidence score (used when calling LLM)
+        explanation: Analysis explanation text (used when calling LLM)
+        processed_data: Optional dict with normalized_results/top_candidates
 
     Returns:
         List of search query strings
     """
+    # If we have processed data, try to generate targeted queries with LLM
+    if processed_data:
+        keywords = _extract_keywords_from_results(processed_data)
+        if keywords:
+            api_key = settings.OPENROUTER_API_KEY
+            if api_key:
+                llm_queries = _call_llm_for_queries(
+                    api_key=api_key,
+                    claim=claim,
+                    verdict=verdict,
+                    confidence=confidence,
+                    explanation=explanation,
+                    keywords=keywords,
+                )
+                if llm_queries:
+                    logger.info(
+                        f"Generated {len(llm_queries)} AI-driven queries from "
+                        f"{len(keywords)} keywords for verdict '{verdict}'"
+                    )
+                    return llm_queries
+            else:
+                logger.warning("OPENROUTER_API_KEY not set — falling back to claim-based queries")
+
+    # Fallback: generate queries from claim + verdict (original behavior)
     if not claim or not claim.strip():
         return []
 
@@ -37,23 +200,16 @@ def generate_research_queries(claim, verdict):
 
     is_false = verdict in ('fake', 'suspicious')
     is_unconfirmed = verdict == 'unconfirmed'
-    is_true = verdict in ('real', 'likely')
 
     if is_false:
-        # Search for the truth — what actually happened
         queries.append(f"{claim} fact check")
-        queries.append(f"{claim} origin debunked misinformation")
-        queries.append(f"what actually happened {claim} verified truth")
+        queries.append(f"{claim} origin debunked")
     elif is_unconfirmed:
-        # Search for any information that might clarify
         queries.append(f"{claim} fact check verification")
         queries.append(f"{claim} evidence sources")
-        queries.append(f"{claim} what is the truth")
     else:
-        # Search for additional confirming evidence
         queries.append(f"{claim} background history")
         queries.append(f"{claim} recent developments")
-        queries.append(f"{claim} expert analysis official statement")
 
     return queries
 
@@ -413,8 +569,14 @@ def generate_research_report(websearch_result, robot_analysis, processed_data):
     confidence = robot_analysis.get('confidence', 0.0)
     explanation = robot_analysis.get('explanation', '')
 
-    # Step 1: Generate search queries based on verdict
-    queries = generate_research_queries(claim, verdict)
+    # Step 1: Generate search queries based on verdict + results
+    queries = generate_research_queries(
+        claim=claim,
+        verdict=verdict,
+        confidence=confidence,
+        explanation=explanation,
+        processed_data=processed_data,
+    )
     if not queries:
         logger.info("No research queries generated (empty claim)")
         return [], _empty_report(), [], [], []

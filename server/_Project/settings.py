@@ -72,6 +72,10 @@ MIDDLEWARE = [
     'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
+# ── Nginx Reverse Proxy Support ──────────────────────────────
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 ROOT_URLCONF = '_Project.urls'
 
 TEMPLATES = [
@@ -159,11 +163,15 @@ AUTH_USER_MODEL = 'authentication.CustomUser'
 CORS_ALLOWED_ORIGINS = [
     env("FRONTEND_URL"),
     "http://localhost:3000",
+    "http://localhost",
+    "http://localhost:80",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     env("FRONTEND_URL"),
     "http://localhost:3000",
+    "http://localhost",
+    "http://localhost:80",
 ]
 
 CORS_ALLOW_CREDENTIALS = True

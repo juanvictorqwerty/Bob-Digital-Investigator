@@ -93,6 +93,7 @@ jobs:
           DJANGO_SUPERUSER_EMAIL=test@example.com
           DJANGO_SUPERUSER_PASSWORD=testpass123
           FRONTEND_URL=http://localhost:3000
+          BACKEND_URL=http://localhost:8000
           # Optional keys — set to empty for tests
           CLOUDINARY_CLOUD_NAME=
           CLOUDINARY_API_KEY=

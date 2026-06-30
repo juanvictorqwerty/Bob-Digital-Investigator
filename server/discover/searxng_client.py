@@ -136,7 +136,7 @@ def search_images(query, page=1, language='auto'):
     results = []
     for item in data.get('results', []):
         results.append({
-            'thumbnail_url': item.get('thumbnail', ''),
+            'thumbnail_url': item.get('thumbnail_src', '') or item.get('thumbnail', ''),
             'source_url': item.get('img_src', '') or item.get('url', ''),
             'page_url': item.get('url', ''),
             'title': item.get('title', ''),

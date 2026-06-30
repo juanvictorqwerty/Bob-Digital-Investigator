@@ -13,13 +13,13 @@ original_each_context = admin.site.each_context
 
 
 def patched_each_context(self, request):
-    context = original_each_context(self, request)
+    context = original_each_context(request)
     context['grafana_url'] = 'http://localhost:3001'
     context['prometheus_url'] = 'http://localhost:9090'
     return context
 
 
-admin.site.each_context = patched_each_context
+admin.site.each_context = patched_each_context.__get__(admin.site, type(admin.site))
 
 
 # Add custom admin URLs for raw metrics endpoints

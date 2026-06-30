@@ -168,10 +168,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    env("FRONTEND_URL"),
-    "http://localhost:3000",
-    "http://localhost",
-    "http://localhost:80",
+    "*"
 ]
 
 CORS_ALLOW_CREDENTIALS = True

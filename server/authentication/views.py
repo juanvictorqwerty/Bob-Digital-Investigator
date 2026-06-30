@@ -1,4 +1,4 @@
-from rest_framework import generics, status
+from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
@@ -11,6 +11,7 @@ class UserRegistrationView(generics.CreateAPIView):
     """Handles user sign-up and returns a fresh token."""
     queryset = CustomUser.objects.all()
     serializer_class = UserRegistrationSerializer
+    permission_classes = [permissions.AllowAny]
 
     def create(self, request, *args, **kwargs):
         # 1. Use the serializer to validate data
@@ -32,6 +33,7 @@ class UserRegistrationView(generics.CreateAPIView):
 class UserLoginView(generics.GenericAPIView):
     """Handles user login, authenticates credentials, and updates/returns a token."""
     serializer_class = UserLoginSerializer
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
